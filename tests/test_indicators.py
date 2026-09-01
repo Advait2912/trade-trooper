@@ -18,10 +18,11 @@ def test_rsi_extremes():
     assert ind.rsi([1.0, 2.0], 14) is None  # not enough data
 
 
-def test_rsi_flat_is_high():
+def test_rsi_flat_is_neutral():
     flat = [10.0] * 20
-    # No losses -> RSI 100 (gains of zero avoided via epsilon-free denominator).
-    assert ind.rsi(flat, 14) == 100.0
+    # A perfectly flat series has no gains or losses: RSI is undefined, so the
+    # convention here is neutral (50.0) rather than 100.
+    assert ind.rsi(flat, 14) == 50.0
 
 
 def test_atr():

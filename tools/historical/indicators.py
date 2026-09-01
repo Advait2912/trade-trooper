@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.momentum import StochasticOscillator
 from ta.trend import MACD, ADXIndicator
 from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
@@ -44,10 +44,31 @@ def ema(values: Sequence[float], period: int) -> float | None:
 
 
 def rsi(closes: Sequence[float], period: int = 14) -> float | None:
-    """Wilder's Relative Strength Index."""
+    """Wilder's Relative Strength Index (pure Python).
+
+    A flat series yields 50.0 (neutral); all-gains -> 100; all-losses -> 0.
+    """
     if period <= 0 or len(closes) < period + 1:
         return None
-    return float(RSIIndicator(pd.Series(closes, dtype="float64"), window=period).rsi().iloc[-1])
+
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0.0 for d in deltas]
+    losses = [-d if d < 0 else 0.0 for d in deltas]
+
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+    if avg_loss == 0.0 and avg_gain == 0.0:
+        return 50.0
+    if avg_loss == 0.0:
+        return 100.0
+    if avg_gain == 0.0:
+        return 0.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 
 def true_ranges(
@@ -74,12 +95,13 @@ def atr(
     """Wilder's Average True Range. Requires at least `period + 1` bars."""
     if period <= 0 or len(highs) < period + 1:
         return None
+    effective = min(period, len(highs) - 1)
     return float(
         AverageTrueRange(
             pd.Series(highs, dtype="float64"),
             pd.Series(lows, dtype="float64"),
             pd.Series(closes, dtype="float64"),
-            window=period,
+            window=effective,
         ).average_true_range().iloc[-1]
     )
 
