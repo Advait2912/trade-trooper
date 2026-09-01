@@ -1,7 +1,7 @@
-"""Phase 2 - Prediction tools (placeholder).
+"""Phase 2 - Prediction tools.
 
-Future tools (implement alongside ``agents/prediction_agent.py``):
-    calculate_technical_indicators(price_history, volume_history) -> dict
-    forecast_volatility(volatility_history, current_iv) -> dict
-    estimate_price_move(prediction_inputs) -> dict
+    calculate_technical_indicators(technical) -> dict
+    apply_news_adjustment(momentum, sentiment, score) -> tuple[float, float]
+    forecast_volatility(volatility, historical_trends) -> dict
+    estimate_price_move(market, adjusted_momentum, ...) -> dict
 """

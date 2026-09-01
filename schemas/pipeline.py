@@ -18,6 +18,7 @@ from schemas.common import (
     Trend,
 )
 from schemas.historical import HistoricalAgentResult
+from schemas.prediction import PredictionResult
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +137,9 @@ class FinalReport(BaseModel):
     historical: HistoricalAgentResult = Field(
         default_factory=lambda: HistoricalAgentResult()
     )
-    prediction: PhaseResult = Field(default_factory=lambda: PhaseResult(phase="prediction"))
+    prediction: PredictionResult = Field(
+        default_factory=lambda: PredictionResult(status="not_implemented")
+    )
     risk: PhaseResult = Field(default_factory=lambda: PhaseResult(phase="risk"))
     decision: PhaseResult = Field(default_factory=lambda: PhaseResult(phase="decision"))
     analysis: Analysis = Field(default_factory=lambda: Analysis())

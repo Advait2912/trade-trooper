@@ -54,6 +54,7 @@ from schemas.pipeline import (
     WebResearch,
     WebSource,
 )
+from schemas.prediction import PredictionResult
 from utils.config import ConfigError, Settings
 from utils.logging import PipelineClock, StageTimer
 from web.search import WebResearcher, generate_queries
@@ -117,7 +118,7 @@ class Pipeline:
             web = WebResearch(performed=False)
 
         # ---------------------------------------------------------------
-        # PHASE 2 — sequential prediction (placeholder)
+        # PHASE 2 — sequential prediction (deterministic, no LLM)
         # ---------------------------------------------------------------
         prediction_agent = PredictionAgent()
         with StageTimer("Phase 2 - prediction", log):
@@ -306,7 +307,7 @@ class Pipeline:
         market: MarketData,
         historical: HistoricalAgentResult,
         synthesis: FinalSynthesis | None,
-        prediction: PhaseResult,
+        prediction: PredictionResult,
         risk: PhaseResult,
         decision: PhaseResult,
     ) -> FinalReport:
