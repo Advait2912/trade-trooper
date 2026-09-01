@@ -2,12 +2,12 @@
 
 from datetime import datetime, timedelta, timezone
 
-from agent.schemas import NewsArticle
 from alpaca.news import (
     filter_articles,
     normalize_headline,
     parse_alpaca_news,
 )
+from schemas.news import NewsArticle
 
 
 def _article(headline: str, symbols=None, created_at=None, summary="", source="x"):

@@ -10,13 +10,15 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Type, TypeVar
+from urllib.parse import urljoin
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from agent import prompts
-from agent.schemas import FinalSynthesis, InitialAnalysis, NewsArticle
+from agents import prompts
+from schemas.news import InitialAnalysis, NewsArticle
+from schemas.pipeline import FinalSynthesis
 from utils.config import Settings
 
 log = logging.getLogger("market_intel_agent.ollama")
@@ -43,8 +45,8 @@ class OllamaClient:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._chat_url = settings.ollama_base_url.rstrip("/") + "/api/chat"
-        self._client: Optional[httpx.AsyncClient] = None
+        self._chat_url = urljoin(settings.ollama_base_url, "api/chat")
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "OllamaClient":
         self._client = httpx.AsyncClient(timeout=self._settings.ollama_timeout)
@@ -58,9 +60,7 @@ class OllamaClient:
     # ------------------------------------------------------------------
     # High-level analysis entry points
     # ------------------------------------------------------------------
-    async def analyze_initial(
-        self, ticker: str, article: NewsArticle
-    ) -> InitialAnalysis:
+    async def analyze_initial(self, ticker: str, article: NewsArticle) -> InitialAnalysis:
         prompt = prompts.build_initial_prompt(ticker, article)
         return await self._complete(
             prompt=prompt,
@@ -75,6 +75,7 @@ class OllamaClient:
         initial_block: str,
         web_block: str,
         market_block: str,
+        historical_block: str,
         performed: bool,
     ) -> FinalSynthesis:
         prompt = prompts.build_final_prompt(
@@ -83,6 +84,7 @@ class OllamaClient:
             initial_block=initial_block,
             web_block=web_block,
             market_block=market_block,
+            historical_block=historical_block,
             performed=performed,
         )
         return await self._complete(
@@ -129,7 +131,7 @@ class OllamaClient:
         prompt: str,
         system: str,
         fmt: Any,
-        repair: Optional[str] = None,
+        repair: str | None = None,
     ) -> str:
         assert self._client is not None
         messages: list[dict] = [
@@ -153,7 +155,7 @@ class OllamaClient:
                 }
             )
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": self._settings.ollama_model,
             "messages": messages,
             "stream": False,
@@ -196,10 +198,9 @@ def _looks_like_unsupported_format(status: int, body: str) -> bool:
     return "format" in lowered and ("invalid" in lowered or "unsupported" in lowered)
 
 
-def _json_schema(model: Type[BaseModel]) -> Dict[str, Any]:
+def _json_schema(model: Type[BaseModel]) -> dict[str, Any]:
     """Derive a JSON Schema from a Pydantic model for Ollama structured output."""
-    schema = model.model_json_schema()
-    return schema
+    return model.model_json_schema()
 
 
 def _parse_model(content: str, model: Type[T]) -> T:

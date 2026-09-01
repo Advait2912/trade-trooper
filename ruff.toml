@@ -1,0 +1,10 @@
+target-version = "py311"
+line-length = 100
+exclude = [".venv", ".git", "*.lock"]
+
+[lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501", "E741"]
+
+[lint.isort]
+known-first-party = ["alpaca", "analysis", "agents", "orchestrator", "schemas", "tools", "utils", "web"]

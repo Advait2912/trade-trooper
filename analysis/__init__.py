@@ -1,1 +1,0 @@
-"""Deterministic technical analysis (indicators)."""

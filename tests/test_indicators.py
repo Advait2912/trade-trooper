@@ -1,6 +1,6 @@
 """Deterministic indicator correctness."""
 
-from analysis import indicators as ind
+from tools.historical import indicators as ind
 
 
 def test_sma():

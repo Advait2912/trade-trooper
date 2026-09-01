@@ -72,7 +72,7 @@ def test_market_closed_labeled():
 
 
 def test_suggest_trend():
-    from agent.schemas import MarketData
+    from schemas.market import MarketData
 
     md = MarketData(price=110.0, sma20=105.0, sma50=100.0, rsi14=60.0)
     assert suggest_trend(md).value == "bullish"

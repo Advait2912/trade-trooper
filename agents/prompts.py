@@ -7,7 +7,7 @@ research analyst rather than a chatbot.
 
 from __future__ import annotations
 
-from agent.schemas import NewsArticle
+from schemas.news import NewsArticle
 
 SYSTEM_PROMPT = """\
 You are a junior financial research analyst working inside an intelligence \
@@ -98,6 +98,9 @@ C. Web research findings:
 D. Market data and technical indicators:
 {market_block}
 
+E. Historical data and technical analysis:
+{historical_block}
+
 Requirements:
 - Distinguish FACTS, INFERENCES, and UNCERTAINTIES.
 - Do NOT translate bullish news automatically into a buy. You may conclude \
@@ -107,6 +110,8 @@ evidence, or insufficient evidence.
 - "web_research.performed" must be {performed} (a JSON boolean) and \
 "web_research.key_findings" / "web_research.sources" must reflect the research \
 above (empty if none was performed).
+- Use the historical context to corroborate or challenge the news-driven \
+narrative, but never invent numbers.
 
 Return a JSON object with exactly these fields:
 {{
@@ -167,6 +172,7 @@ def build_final_prompt(
     initial_block: str,
     web_block: str,
     market_block: str,
+    historical_block: str,
     performed: bool,
 ) -> str:
     return FINAL_SYNTHESIS_PROMPT.format(
@@ -175,5 +181,6 @@ def build_final_prompt(
         initial_block=initial_block,
         web_block=web_block,
         market_block=market_block,
+        historical_block=historical_block,
         performed="true" if performed else "false",
     )

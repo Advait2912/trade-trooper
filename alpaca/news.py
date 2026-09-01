@@ -6,8 +6,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from agent.schemas import NewsArticle
 from alpaca.client import AlpacaClient
+from schemas.news import NewsArticle
 
 NEWS_ENDPOINT = "/v1beta1/news"
 

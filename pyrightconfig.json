@@ -1,0 +1,12 @@
+{
+  "include": ["agents", "orchestrator", "tools", "schemas", "alpaca", "utils", "web", "main.py"],
+  "exclude": [".venv", ".git", "tests"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingModuleSource": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportOptionalSubscript": "none",
+  "reportOptionalMemberAccess": "none"
+}

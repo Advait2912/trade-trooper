@@ -5,7 +5,7 @@ No real credentials or Ollama server required.
 
 import respx
 
-from agent.pipeline import Pipeline
+from orchestrator.pipeline import Pipeline
 from tests.conftest import (
     FINAL_JSON,
     INITIAL_JSON,
