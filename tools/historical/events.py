@@ -24,8 +24,6 @@ def identify_trading_events(
         return {"events": []}
 
     closes = [float(b["close"]) for b in price_history]
-    highs = [float(b["high"]) for b in price_history]
-    lows = [float(b["low"]) for b in price_history]
     volumes = [float(v) for v in volume_history]
 
     events: list[dict[str, Any]] = []
