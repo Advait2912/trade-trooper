@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agent.schemas import (
+from schemas import (
     Analysis,
     Bias,
     EventAssessment,
@@ -64,7 +64,7 @@ def test_final_report_roundtrip():
 
 
 def test_bias_default():
-    from agent.schemas import CouncilInput
+    from schemas import CouncilInput
 
     ci = CouncilInput()
     assert ci.recommended_bias is Bias.NEUTRAL

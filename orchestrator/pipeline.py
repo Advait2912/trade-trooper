@@ -1,17 +1,15 @@
-"""The async controller that orchestrates the full intelligence pipeline.
+"""The async orchestrator running the phased trading-intelligence pipeline.
 
-Stages:
-  1. Fetch Alpaca news
-  2. Deterministic filtering/selection (already applied in alpaca.news)
-  3. Initial Gemma analysis (per selected article, in parallel)
-  4. Web research (only when warranted)
-  5. Web fetch (extract text from chosen pages)
-  6. Market data + deterministic indicators
-  7. Final Gemma synthesis
+Phases (per the phase architecture):
+  PHASE 1 (parallel collection, ~4s): News Collection Agent, Market Data
+      Agent, Historical Data Agent run concurrently.
+  PHASE 2 (sequential, ~3s): Prediction Agent (placeholder).
+  PHASE 3 (sequential, ~2s): Risk Agent (placeholder).
+  PHASE 4 (sequential, ~1s): Decision Agent (placeholder).
 
-Every stage is timed and independently degradable: a failure in one stage
-(e.g. Ollama down) produces a partial but still-valid report rather than
-crashing the whole run.
+  Followed by: web research (when warranted) and final LLM synthesis into the
+  report. Every stage is timed and independently degradable: a failure in one
+  stage produces a partial but still-valid report rather than crashing.
 """
 
 from __future__ import annotations
@@ -20,32 +18,42 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, cast
+from typing import Any, cast
 
-from agent.analyst import OllamaClient, OllamaError
-from agent.schemas import (
+from agents.decision_agent import DecisionAgent
+from agents.historical_agent import HistoricalAgent
+from agents.llm import OllamaClient, OllamaError
+from agents.market_data_agent import MarketDataAgent
+from agents.news_agent import NewsCollectionAgent
+from agents.prediction_agent import PredictionAgent
+from agents.risk_agent import RiskAgent
+from schemas.common import (
     Actionability,
     Bias,
     EvidenceQuality,
+    Materiality,
+    Sentiment,
+    TimeHorizon,
+    Trend,
+)
+from schemas.historical import HistoricalAgentResult
+from schemas.market import MarketData
+from schemas.news import InitialAnalysis, NewsArticle, NewsCollectionResult
+from schemas.pipeline import (
+    Analysis,
+    CouncilInput,
+    EventAssessment,
+    Evidence,
     FetchedPage,
     FinalReport,
     FinalSynthesis,
-    InitialAnalysis,
     MarketContext,
-    MarketData,
-    Materiality,
-    NewsArticle,
     NewsRef,
-    Sentiment,
+    PhaseResult,
     SourceRelevance,
-    TimeHorizon,
-    Trend,
     WebResearch,
     WebSource,
 )
-from alpaca.client import AlpacaClient, AlpacaError
-from alpaca.market_data import fetch_market_data, suggest_trend
-from alpaca.news import fetch_news
 from utils.config import ConfigError, Settings
 from utils.logging import PipelineClock, StageTimer
 from web.search import WebResearcher, generate_queries
@@ -54,13 +62,13 @@ log = logging.getLogger("market_intel_agent.pipeline")
 
 
 class Pipeline:
-    """Orchestrates news -> analyze -> research -> market -> synthesize."""
+    """Orchestrates Phase 1 collection -> Phase 2-4 -> synthesis."""
 
     def __init__(
         self,
         settings: Settings,
         verbose: bool = False,
-        company_names: Optional[List[str]] = None,
+        company_names: list[str] | None = None,
     ) -> None:
         self.settings = settings
         self.verbose = verbose
@@ -77,140 +85,126 @@ class Pipeline:
         self.clock.mark("Starting")
 
         # ---------------------------------------------------------------
-        # Stage 1 + 2 — Alpaca news (fetch + deterministic filter)
+        # PHASE 1 — parallel data collection (news + market + historical)
         # ---------------------------------------------------------------
-        articles: List[NewsArticle] = []
-        with StageTimer("Alpaca news fetched", log):
-            try:
-                async with AlpacaClient(self.settings) as client:
-                    articles = await fetch_news(
-                        client,
-                        ticker,
-                        self.settings.news_limit,
-                        self.settings.lookback_hours,
-                        self.company_names,
-                    )
-            except AlpacaError as exc:
-                log.warning("Alpaca news fetch failed: %s", exc)
+        with StageTimer("Phase 1 - parallel data collection", log):
+            phase1 = await self._phase1(ticker)
+        news_result = phase1["news"]
+        market = phase1["market"]
+        historical = phase1["historical"]
 
-        self.clock.mark(f"{len(articles)} articles selected")
+        self.clock.mark(
+            f"Phase 1 complete: {len(news_result.articles)} articles, "
+            f"{historical.bars_count} bars"
+        )
 
-        if not articles:
-            return self._empty_report(
-                ticker, "No relevant news found for the lookback window."
+        if not news_result.articles:
+            return self._empty_report(ticker, "No relevant news found for the lookback window.", historical)
+
+        article = news_result.primary_article
+        analysis = news_result.primary_analysis
+        if article is None or analysis is None:  # pragma: no cover - defensive
+            article, analysis = news_result.articles[0], _fallback_initial(
+                ticker, news_result.articles[0]
             )
 
-        if self.verbose:
-            for a in articles:
-                log.debug("selected headline: %s", a.headline)
-
         # ---------------------------------------------------------------
-        # Stage 3 — Initial Gemma analysis (parallel per article)
+        # Web research (only when warranted by the initial analysis)
         # ---------------------------------------------------------------
-        analyses: List[Tuple[NewsArticle, InitialAnalysis]] = []
-        with StageTimer("Initial Gemma analysis complete", log):
-            analyses = await self._analyze_all(ticker, articles)
-
-        primary_article, primary_analysis = self._pick_primary(analyses)
-
-        # ---------------------------------------------------------------
-        # Stage 4/5 — Web research (parallel with market data)
-        # ---------------------------------------------------------------
-        web_task = self._research(
-            ticker, primary_article, primary_analysis
-        ) if primary_analysis.needs_web_research else None
-        market_task = self._market_data(ticker)
-
-        if web_task is not None:
-            web_result, market_data = await asyncio.gather(
-                web_task, market_task, return_exceptions=True
-            )
+        if analysis.needs_web_research:
+            web = await self._research(ticker, article, analysis)
         else:
-            web_result = None
-            try:
-                market_data = await market_task
-            except AlpacaError as exc:
-                log.warning("Market data fetch failed: %s", exc)
-                market_data = MarketData()
-
-        if isinstance(web_result, BaseException):
-            log.warning("Web research failed: %s", web_result)
-            web_result = None
-        if isinstance(market_data, BaseException):
-            log.warning("Market data fetch failed: %s", market_data)
-            market_data = MarketData()
-
-        web = cast(Optional[WebResearch], web_result)
-        market = cast(MarketData, market_data)
+            web = WebResearch(performed=False)
 
         # ---------------------------------------------------------------
-        # Stage 7 — Final Gemma synthesis
+        # PHASE 2 — sequential prediction (placeholder)
         # ---------------------------------------------------------------
-        synthesis: Optional[FinalSynthesis] = None
+        prediction_agent = PredictionAgent()
+        with StageTimer("Phase 2 - prediction", log):
+            prediction = await prediction_agent.run(phase1)
+
+        # ---------------------------------------------------------------
+        # PHASE 3 — sequential risk (placeholder)
+        # ---------------------------------------------------------------
+        risk_agent = RiskAgent()
+        with StageTimer("Phase 3 - risk", log):
+            risk = await risk_agent.run(phase1, prediction)
+
+        # ---------------------------------------------------------------
+        # PHASE 4 — sequential decision (placeholder)
+        # ---------------------------------------------------------------
+        decision_agent = DecisionAgent()
+        with StageTimer("Phase 4 - decision", log):
+            decision = await decision_agent.run(phase1, prediction, risk)
+
+        # ---------------------------------------------------------------
+        # Final LLM synthesis
+        # ---------------------------------------------------------------
+        synthesis: FinalSynthesis | None = None
         with StageTimer("Final analysis complete", log):
             try:
                 synthesis = await self._synthesize(
                     ticker,
-                    primary_article,
-                    primary_analysis,
+                    article,
+                    analysis,
                     web,
                     market,
+                    historical,
                 )
             except OllamaError as exc:
                 log.warning("Final synthesis failed: %s", exc)
 
         report = self._build_report(
             ticker,
-            primary_article,
-            primary_analysis,
+            article,
+            analysis,
             web,
             market,
+            historical,
             synthesis,
+            prediction,
+            risk,
+            decision,
         )
         self.clock.mark("Done")
         return report
 
     # ------------------------------------------------------------------
-    # Stage helpers
+    # Phase helpers
     # ------------------------------------------------------------------
-    async def _analyze_all(
-        self, ticker: str, articles: List[NewsArticle]
-    ) -> List[Tuple[NewsArticle, InitialAnalysis]]:
-        results: List[Tuple[NewsArticle, InitialAnalysis]] = []
-        async with OllamaClient(self.settings) as ollama:
-            tasks = [ollama.analyze_initial(ticker, a) for a in articles]
-            outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    async def _phase1(self, ticker: str) -> dict[str, Any]:
+        news_agent = NewsCollectionAgent(
+            self.settings, verbose=self.verbose, company_names=self.company_names
+        )
+        market_agent = MarketDataAgent(self.settings)
+        historical_agent = HistoricalAgent(self.settings)
 
-        for article, outcome in zip(articles, outcomes):
-            if isinstance(outcome, BaseException):
-                log.warning(
-                    "Initial analysis failed for %r: %s", article.headline, outcome
-                )
-                analysis = _fallback_initial(ticker, article)
-            else:
-                analysis = cast(InitialAnalysis, outcome)
-            results.append((article, analysis))
-        return results
+        with StageTimer("Phase 1 agents fetched", log):
+            news, market, historical = await asyncio.gather(
+                news_agent.run(ticker),
+                market_agent.run(ticker),
+                historical_agent.run(ticker),
+                return_exceptions=True,
+            )
 
-    @staticmethod
-    def _pick_primary(
-        analyses: List[Tuple[NewsArticle, InitialAnalysis]]
-    ) -> Tuple[NewsArticle, InitialAnalysis]:
-        """Choose the article that matters most for the final report."""
+        if isinstance(news, BaseException):
+            log.warning("News agent failed: %s", news)
+            news = NewsCollectionResult(ticker=ticker, errors=[str(news)])
+        if isinstance(market, BaseException):
+            log.warning("Market agent failed: %s", market)
+            market = MarketData()
+        if isinstance(historical, BaseException):
+            log.warning("Historical agent failed: %s", historical)
+            historical = HistoricalAgentResult(symbol=ticker, status="partial")
 
-        def score(pair: Tuple[NewsArticle, InitialAnalysis]) -> Tuple[float, int]:
-            _, a = pair
-            materiality = {"low": 0, "medium": 1, "high": 2}[a.materiality.value]
-            return (a.relevance, materiality)
-
-        return max(analyses, key=score)
+        return {"news": news, "market": market, "historical": historical}
 
     async def _research(
         self,
         ticker: str,
         article: NewsArticle,
         analysis: InitialAnalysis,
-    ) -> Optional[WebResearch]:
+    ) -> WebResearch:
         researcher = WebResearcher(self.settings)
         queries = generate_queries(
             ticker,
@@ -218,7 +212,6 @@ class Pipeline:
             analysis.research_questions,
             self.company_names,
         )
-        # Cap the number of search rounds.
         queries = queries[: self.settings.max_search_rounds]
 
         if self.verbose:
@@ -236,14 +229,13 @@ class Pipeline:
 
         results = _dedupe_results(results)
 
-        # Choose pages to fetch (prefer primary sources), then fetch in parallel.
         to_fetch = _rank_results(results)[: self.settings.max_fetch_pages]
         fetched = await asyncio.gather(
             *(researcher.fetch(r.url) for r in to_fetch), return_exceptions=True
         )
 
-        pages = []
-        fetched_urls = set()
+        pages: list[FetchedPage] = []
+        fetched_urls: set[str] = set()
         for page in fetched:
             if isinstance(page, BaseException) or page is None:
                 continue
@@ -259,54 +251,37 @@ class Pipeline:
 
     def _build_web_research(
         self,
-        results: List,
-        pages: List,
-        fetched_urls: set,
+        results: list,
+        pages: list,
+        fetched_urls: set[str],
     ) -> WebResearch:
-        sources: List[WebSource] = []
+        sources: list[WebSource] = []
         for r in results:
             relevance = SourceRelevance.HIGH if r.url in fetched_urls else SourceRelevance.MEDIUM
             sources.append(
-                WebSource(
-                    title=r.title,
-                    source=_domain_of(r.url),
-                    url=r.url,
-                    relevance=relevance,
-                )
+                WebSource(title=r.title, source=_domain_of(r.url), url=r.url, relevance=relevance)
             )
-        # De-duplicate sources by URL.
         seen = set()
-        unique_sources: List[WebSource] = []
+        unique_sources: list[WebSource] = []
         for s in sources:
             if s.url and s.url not in seen:
                 seen.add(s.url)
                 unique_sources.append(s)
 
-        # Deterministic findings from fetched page titles/lead text.
         key_findings = [
             f"{p.title or p.url}: {p.content[:200].strip()}" for p in pages if p.content
         ][:5]
 
-        return WebResearch(
-            performed=True,
-            key_findings=key_findings,
-            sources=unique_sources,
-        )
-
-    async def _market_data(self, ticker: str) -> MarketData:
-        with StageTimer("Market data retrieved", log):
-            async with AlpacaClient(self.settings) as client:
-                return await fetch_market_data(
-                    client, ticker, self.settings.alpaca_data_feed
-                )
+        return WebResearch(performed=True, key_findings=key_findings, sources=unique_sources)
 
     async def _synthesize(
         self,
         ticker: str,
         article: NewsArticle,
         initial: InitialAnalysis,
-        web: Optional[WebResearch],
+        web: WebResearch,
         market: MarketData,
+        historical: HistoricalAgentResult,
     ) -> FinalSynthesis:
         async with OllamaClient(self.settings) as ollama:
             return await ollama.synthesize(
@@ -315,7 +290,8 @@ class Pipeline:
                 initial_block=_initial_block(initial),
                 web_block=_web_block(web),
                 market_block=_market_block(market),
-                performed=web is not None and web.performed,
+                historical_block=_historical_block(historical),
+                performed=web.performed,
             )
 
     # ------------------------------------------------------------------
@@ -326,16 +302,19 @@ class Pipeline:
         ticker: str,
         article: NewsArticle,
         initial: InitialAnalysis,
-        web: Optional[WebResearch],
+        web: WebResearch,
         market: MarketData,
-        synthesis: Optional[FinalSynthesis],
+        historical: HistoricalAgentResult,
+        synthesis: FinalSynthesis | None,
+        prediction: PhaseResult,
+        risk: PhaseResult,
+        decision: PhaseResult,
     ) -> FinalReport:
         now = datetime.now(timezone.utc).isoformat()
 
         if synthesis is None:
             synthesis = _fallback_synthesis(initial, web)
 
-        # Market context numbers are always deterministic.
         market_context = MarketContext(
             price=round(market.price, 2),
             return_1d=round(market.return_1d, 4),
@@ -344,13 +323,11 @@ class Pipeline:
             sma50=round(market.sma50, 2),
             rsi14=round(market.rsi14, 2),
             volume_vs_average=round(market.volume_vs_average, 2),
-            trend=synthesis.market_trend if synthesis.market_trend != Trend.UNCERTAIN
-            else suggest_trend(market),
+            trend=(
+                synthesis.market_trend if synthesis.market_trend != Trend.UNCERTAIN else _suggest_trend(market)
+            ),
         )
 
-        # Web research: `performed` and `sources` are deterministic facts
-        # (never the LLM's assertions); `key_findings` reflect the LLM's
-        # interpretation when available, else the deterministic excerpts.
         web_research = synthesis.web_research
         if web is not None:
             web_research = WebResearch(
@@ -374,14 +351,22 @@ class Pipeline:
             evidence=synthesis.evidence,
             web_research=web_research,
             market_context=market_context,
+            historical=historical,
             analysis=synthesis.analysis,
             council_input=synthesis.council_input,
+            prediction=prediction,
+            risk=risk,
+            decision=decision,
         )
 
-    def _empty_report(self, ticker: str, message: str) -> FinalReport:
+    def _empty_report(
+        self, ticker: str, message: str, historical: HistoricalAgentResult | None = None
+    ) -> FinalReport:
         self.clock.mark("Done")
         now = datetime.now(timezone.utc).isoformat()
-        synthesis = _fallback_synthesis(_fallback_initial(ticker, _blank_article(ticker)), None)
+        synthesis = _fallback_synthesis(
+            _fallback_initial(ticker, _blank_article(ticker)), None
+        )
         synthesis.analysis.summary = f"{message} Insufficient evidence."
         synthesis.evidence.uncertainties.append(message)
         return FinalReport(
@@ -392,6 +377,7 @@ class Pipeline:
             evidence=synthesis.evidence,
             web_research=WebResearch(performed=False),
             market_context=MarketContext(),
+            historical=historical or HistoricalAgentResult(),
             analysis=synthesis.analysis,
             council_input=synthesis.council_input,
         )
@@ -418,10 +404,8 @@ def _fallback_initial(ticker: str, article: NewsArticle) -> InitialAnalysis:
 
 
 def _fallback_synthesis(
-    initial: InitialAnalysis, web: Optional[WebResearch]
+    initial: InitialAnalysis, web: WebResearch | None
 ) -> FinalSynthesis:
-    from agent.schemas import Analysis, CouncilInput, EventAssessment, Evidence
-
     return FinalSynthesis(
         event=EventAssessment(
             description=initial.event,
@@ -470,7 +454,7 @@ def _initial_block(analysis: InitialAnalysis) -> str:
     return json.dumps(analysis.model_dump(), indent=2)
 
 
-def _web_block(web: Optional[WebResearch]) -> str:
+def _web_block(web: WebResearch) -> str:
     if web is None or not web.performed:
         return "No web research was performed."
     return json.dumps(web.model_dump(), indent=2)
@@ -480,10 +464,49 @@ def _market_block(market: MarketData) -> str:
     return json.dumps(market.model_dump(), indent=2)
 
 
+def _historical_block(historical: HistoricalAgentResult) -> str:
+    if historical is None or not historical.bars_count:
+        return "No historical data available."
+
+    def summarize(d: Any) -> str:
+        return json.dumps(d, default=str) if d else "(none)"
+
+    parts = [
+        f"Historical trends: {summarize(historical.historical_trends)}",
+        f"Technical indicator bundle: {summarize(historical.technical)}",
+        f"Volatility analysis: {summarize(historical.volatility)}",
+        f"Risk statistics: {summarize(historical.risk)}",
+        f"Technical summary: {summarize(historical.summary)}",
+    ]
+    if historical.patterns:
+        parts.append(f"Chart patterns: {summarize(historical.patterns)}")
+    return "\n".join(parts)
+
+
+def _suggest_trend(md: MarketData) -> Trend:
+    """Deterministic default trend from price vs moving averages and RSI."""
+    if md.price <= 0:
+        return Trend.UNCERTAIN
+    if md.sma20 and md.sma50:
+        above = md.price > md.sma20 > md.sma50
+        below = md.price < md.sma20 < md.sma50
+    elif md.sma20:
+        above = md.price > md.sma20
+        below = md.price < md.sma20
+    else:
+        above = below = False
+
+    if above and md.rsi14 >= 50:
+        return Trend.BULLISH
+    if below and md.rsi14 <= 50:
+        return Trend.BEARISH
+    return Trend.NEUTRAL
+
+
 # ---------------------------------------------------------------------------
 # Search result ranking helpers
 # ---------------------------------------------------------------------------
-def _dedupe_results(results: List) -> List:
+def _dedupe_results(results: list) -> list:
     seen = set()
     out = []
     for r in results:
@@ -496,7 +519,7 @@ def _dedupe_results(results: List) -> List:
     return out
 
 
-def _rank_results(results: List) -> List:
+def _rank_results(results: list) -> list:
     """Prefer primary sources (SEC, company IR, reputable publications)."""
     return sorted(results, key=lambda r: _source_priority(r.url))
 

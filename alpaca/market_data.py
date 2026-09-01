@@ -8,9 +8,10 @@ from datetime import datetime, time, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from agent.schemas import MarketData, Trend
 from alpaca.client import AlpacaClient
-from analysis import indicators as ind
+from schemas.common import Trend
+from schemas.market import MarketData
+from tools.historical import indicators as ind
 
 log = logging.getLogger("market_intel_agent.market_data")
 

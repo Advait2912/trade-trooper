@@ -1,7 +1,8 @@
 """Command-line entry point for the market intelligence agent.
 
 Usage:
-    python main.py NVDA
+    python main.py NVDA                       # full 4-phase pipeline
+    python main.py NVDA --historical          # Phase 1 historical agent only
     python main.py NVDA --news-limit 5 --lookback-hours 24 --verbose
 """
 
@@ -11,10 +12,11 @@ import argparse
 import asyncio
 import json
 import sys
-from typing import Optional
 
-from agent.pipeline import Pipeline
-from agent.schemas import FinalReport
+from agents.historical_agent import HistoricalAgent
+from orchestrator.pipeline import Pipeline
+from schemas.historical import HistoricalAgentResult
+from schemas.pipeline import FinalReport
 from utils.config import ConfigError, load_settings, validate_ticker
 from utils.logging import setup_logging
 
@@ -22,9 +24,14 @@ from utils.logging import setup_logging
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="market_intel_agent",
-        description="Research-only market intelligence agent (never trades).",
+        description="Agentic market intelligence (Phase 1 collection + Phase 2-4 pipeline).",
     )
     parser.add_argument("ticker", help="Stock ticker, e.g. NVDA")
+    parser.add_argument(
+        "--historical",
+        action="store_true",
+        help="Run only the Phase 1 Historical Data Agent and print its result.",
+    )
     parser.add_argument(
         "--news-limit",
         type=int,
@@ -43,6 +50,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show selected headlines, queries, URLs and raw model output.",
     )
     return parser
+
+
+def render_historical(result: HistoricalAgentResult) -> str:
+    """Human-readable historical agent result."""
+    lines = ["=" * 40, "HISTORICAL DATA AGENT — PHASE 1", "=" * 40]
+    lines.append(f"Symbol: {result.symbol}")
+    lines.append(f"Status: {result.status}")
+    lines.append(f"Bars: {result.bars_count}")
+    lines.append("")
+    tr = result.historical_trends
+    if tr:
+        lines.append("HISTORICAL TRENDS")
+        lines.append("-" * 16)
+        for key, value in tr.items():
+            lines.append(f"{key}: {value}")
+        lines.append("")
+    if result.volatility_history:
+        lines.append("VOLATILITY HISTORY (latest)")
+        lines.append("-" * 27)
+        for pt in result.volatility_history[-5:]:
+            lines.append(
+                f"{pt.date}  rvol={pt.realized_vol:.2f}%  "
+                f"20d={pt.rolling_vol_20d:.2f}%  60d={pt.rolling_vol_60d:.2f}%"
+            )
+    summary = result.summary
+    if summary:
+        lines.append("")
+        lines.append("TECHNICAL SUMMARY")
+        lines.append("-" * 17)
+        lines.append(f"Overall signal: {summary.get('overall_signal', 'n/a')}")
+        lines.append(summary.get("summary_text", ""))
+    if result.errors:
+        lines.append("")
+        lines.append("ERRORS")
+        lines.append("-" * 6)
+        for e in result.errors:
+            lines.append(f"- {e}")
+    return "\n".join(lines)
 
 
 def render_report(report: FinalReport, verbose: bool = False) -> str:
@@ -110,6 +155,25 @@ def render_report(report: FinalReport, verbose: bool = False) -> str:
     lines.append(f"Trend: {mc.trend.value.capitalize()}")
     lines.append("")
 
+    hist = report.historical
+    if hist.status != "not_implemented" and hist.bars_count:
+        lines.append("HISTORICAL CONTEXT")
+        lines.append("-" * 19)
+        trend = hist.historical_trends.get("trend", "n/a")
+        lines.append(f"Trend: {trend}")
+        summary = hist.summary.get("overall_signal", "n/a")
+        lines.append(f"Technical signal: {summary}")
+        lines.append("")
+
+    phs = [("PHASE 2", report.prediction), ("PHASE 3", report.risk), ("PHASE 4", report.decision)]
+    for label, ph in phs:
+        lines.append(label)
+        lines.append("-" * len(label))
+        lines.append(f"Status: {ph.status}")
+        if ph.summary:
+            lines.append(ph.summary)
+        lines.append("")
+
     a = report.analysis
     lines.append("ASSESSMENT")
     lines.append("-" * 10)
@@ -137,6 +201,12 @@ def render_report(report: FinalReport, verbose: bool = False) -> str:
     return "\n".join(lines)
 
 
+async def _run_historical(ticker: str) -> HistoricalAgentResult:
+    settings = load_settings()
+    agent = HistoricalAgent(settings)
+    return await agent.run(ticker)
+
+
 async def _run(ticker: str, args: argparse.Namespace) -> FinalReport:
     settings = load_settings()
     if args.news_limit is not None:
@@ -148,7 +218,7 @@ async def _run(ticker: str, args: argparse.Namespace) -> FinalReport:
     return await pipeline.run(ticker)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     setup_logging(verbose=args.verbose)
@@ -160,6 +230,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
+        if args.historical:
+            result = asyncio.run(_run_historical(ticker))
+            print(render_historical(result))
+            print("\nMACHINE-READABLE JSON:")
+            print(json.dumps(result.model_dump(), indent=2, default=str))
+            return 0
         report = asyncio.run(_run(ticker, args))
     except ConfigError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -170,7 +246,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     print(render_report(report, verbose=args.verbose))
     print("\nMACHINE-READABLE JSON:")
-    print(json.dumps(report.model_dump(), indent=2))
+    print(json.dumps(report.model_dump(), indent=2, default=str))
     return 0
 
 

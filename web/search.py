@@ -11,7 +11,7 @@ from typing import List, Optional
 
 import httpx
 
-from agent.schemas import FetchedPage, SearchResult
+from schemas.pipeline import FetchedPage, SearchResult
 from utils.config import Settings
 from web import fetch as web_fetch
 

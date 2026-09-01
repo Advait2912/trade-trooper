@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -24,6 +24,9 @@ from utils.config import Settings
 NEWS_URL_RE = re.compile(r"https://data\.alpaca\.markets/v1beta1/news.*")
 SNAPSHOT_URL = "https://data.alpaca.markets/v2/stocks/{symbol}/snapshot"
 BARS_URL_RE = re.compile(r"https://data\.alpaca\.markets/v2/stocks/.*/bars.*")
+CORPORATE_ACTIONS_URL_RE = re.compile(
+    r"https://data\.alpaca\.markets/v2/stocks/.*/corporate_actions.*"
+)
 CHAT_URL = "http://localhost:11434/api/chat"
 WEB_SEARCH_URL = "http://localhost:11434/api/experimental/web_search"
 WEB_FETCH_URL = "http://localhost:11434/api/experimental/web_fetch"
@@ -129,6 +132,73 @@ def mock_market_data_error(status: int = 500) -> None:
         return_value=httpx.Response(status)
     )
     respx.get(BARS_URL_RE).mock(return_value=httpx.Response(status))
+
+
+# ---------------------------------------------------------------------------
+# Historical data mock helpers
+# ---------------------------------------------------------------------------
+def historical_bars(symbol: str = "NVDA", n: int = 200, seed: int = 7) -> List[dict]:
+    """Synthetic OHLCV bars: random-walk-ish prices with realistic ranges."""
+    import random
+
+    rng = random.Random(seed)
+    base = datetime(2023, 1, 2, 13, 30, tzinfo=timezone.utc)
+    out = []
+    price = 100.0
+    for i in range(n):
+        day = base + timedelta(days=i)
+        move = rng.uniform(-0.012, 0.014)
+        o = price
+        c = price * (1 + move)
+        h = max(o, c) * (1 + rng.uniform(0.001, 0.008))
+        l = min(o, c) * (1 - rng.uniform(0.001, 0.008))
+        v = int(1_000_000 + rng.uniform(0, 400_000))
+        out.append(
+            {
+                "t": day.isoformat(),
+                "o": round(o, 4),
+                "h": round(h, 4),
+                "l": round(l, 4),
+                "c": round(c, 4),
+                "v": v,
+            }
+        )
+        price = c
+    return out
+
+
+def _dividend_payload(symbol: str, amounts: list[float], years: int = 5) -> dict:
+    base = date(2023, 1, 1)
+    entries = []
+    for i, amount in enumerate(amounts):
+        ex = base + timedelta(days=90 * i)
+        entries.append(
+            {
+                "id": f"div-{i}",
+                "symbol": symbol,
+                "type": "cash_dividend",
+                "ex_date": ex.isoformat(),
+                "record_date": ex.isoformat(),
+                "payable_date": (ex + timedelta(days=7)).isoformat(),
+                "amount": str(amount),
+            }
+        )
+    return {"corporate_actions": {symbol: {"test-asset-id": entries}}}
+
+
+def mock_historical(symbol: str = "NVDA", bars: Optional[dict] = None, dividends: Optional[dict] = None) -> None:
+    """Mock the bars + corporate-actions endpoints used by HistoricalAgent."""
+    respx.get(BARS_URL_RE).mock(
+        return_value=httpx.Response(200, json=dict(bars or {"bars": historical_bars(symbol)}))
+    )
+    respx.get(CORPORATE_ACTIONS_URL_RE).mock(
+        return_value=httpx.Response(200, json=dividends or _dividend_payload(symbol, [1.25, 1.25, 1.3]))
+    )
+
+
+def mock_historical_error(status: int = 500) -> None:
+    respx.get(BARS_URL_RE).mock(return_value=httpx.Response(status))
+    respx.get(CORPORATE_ACTIONS_URL_RE).mock(return_value=httpx.Response(status))
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ from typing import Optional
 
 import httpx
 
-from agent.schemas import FetchedPage
+from schemas.pipeline import FetchedPage
 from utils.config import Settings
 
 log = logging.getLogger("market_intel_agent.web.fetch")
