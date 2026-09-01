@@ -1,4 +1,4 @@
-# market_intel_agent
+# trade_trooper
 
 An agentic trading-intelligence pipeline built on **Alpaca's data APIs**
 (simulated/paper trading environment). Agents collect data in parallel, then
