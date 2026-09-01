@@ -51,21 +51,115 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
         "phase": 1,
         "agent": "historical",
         "description": "Retrieve historical price data (OHLCV) for a symbol",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker (e.g., 'AAPL')"},
+                "days_back": {"type": "integer", "description": "Days of history", "default": 60},
+                "interval": {
+                    "type": "string",
+                    "enum": ["1m", "5m", "15m", "1h", "1d", "1w", "1mo"],
+                    "default": "1d",
+                },
+            },
+            "required": ["symbol"],
+        },
+        "returns": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "prices": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "date": {"type": "string", "format": "date-time"},
+                            "open": {"type": "number"},
+                            "high": {"type": "number"},
+                            "low": {"type": "number"},
+                            "close": {"type": "number"},
+                            "volume": {"type": "integer"},
+                        },
+                    },
+                },
+            },
+        },
     },
     "get_dividends_history": {
         "phase": 1,
         "agent": "historical",
         "description": "Retrieve historical dividend data",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "years_back": {"type": "integer", "default": 5},
+            },
+            "required": ["symbol"],
+        },
+        "returns": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "dividend_amount": {"type": "number"},
+                    "ex_date": {"type": "string"},
+                },
+            },
+        },
     },
     "get_earnings_history": {
         "phase": 1,
         "agent": "historical",
         "description": "Get historical earnings data and dates (Alpaca-unavailable stub)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "quarters": {"type": "integer", "default": 8},
+            },
+            "required": ["symbol"],
+        },
+        "returns": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "eps_actual": {"type": "number"},
+                    "eps_estimate": {"type": "number"},
+                    "revenue": {"type": "number"},
+                    "surprise_percent": {"type": "number"},
+                },
+            },
+        },
     },
     "get_volatility_history": {
         "phase": 1,
         "agent": "historical",
         "description": "Get historical realized volatility over time",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "days_back": {"type": "integer", "default": 252},
+                "period": {"type": "integer", "default": 20},
+            },
+            "required": ["symbol"],
+        },
+        "returns": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "realized_vol": {"type": "number"},
+                    "rolling_vol_20d": {"type": "number"},
+                    "rolling_vol_60d": {"type": "number"},
+                },
+            },
+        },
     },
     "calculate_moving_averages": {
         "phase": 1,
