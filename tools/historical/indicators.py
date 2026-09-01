@@ -338,10 +338,17 @@ def calculate_stochastic(
     stoch = StochasticOscillator(
         _series(highs), _series(lows), _series(closes), window=period
     )
-    k_hist = pd.Series(stoch.stoch()).astype(float)
-    d_hist = k_hist.rolling(window=3).mean()
-    k = _clean(k_hist.iloc[-1], 50.0)
-    d = _clean(d_hist.iloc[-1], 50.0)
+    k_vals = np.asarray(stoch.stoch(), dtype=float)
+    k_vals = k_vals[~np.isnan(k_vals)]
+    if len(k_vals) < 3:
+        return {
+            "k_percent": 0.0,
+            "d_percent": 0.0,
+            "signal": "neutral",
+            "crossover": "none",
+        }
+    k = float(k_vals[-1])
+    d = float(k_vals[-3:].mean())
 
     if k > 80:
         signal = "overbought"
@@ -350,8 +357,9 @@ def calculate_stochastic(
     else:
         signal = "neutral"
 
-    if len(k_hist) >= 3:
-        prev_k, prev_d = _clean(k_hist.iloc[-2], 50.0), _clean(d_hist.iloc[-2], 50.0)
+    if len(k_vals) >= 4:
+        prev_k = float(k_vals[-2])
+        prev_d = float(k_vals[-4:-1].mean())
         if prev_k <= prev_d and k > d:
             crossover = "bullish_cross"
         elif prev_k >= prev_d and k < d:
