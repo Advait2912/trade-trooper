@@ -99,6 +99,7 @@ def identify_trend(
     if lookback < 5 or any(c <= 0 for c in closes):
         return {
             "trend": "ranging",
+            "trend_class": "neutral",  # Fix: added to prevent KeyError in HistoricalAgent
             "trend_strength": 0.0,
             "angle": 0.0,
             "days_in_trend": 0,

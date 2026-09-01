@@ -76,3 +76,11 @@ class HistoricalAgentResult(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     bars_count: int = 0
     errors: list[str] = Field(default_factory=list)
+
+    # Raw bar arrays — populated by HistoricalAgent, consumed by Phase 2.
+    # These are the same bars already fetched; we store them here so Phase 2
+    # can reuse them without re-fetching from Alpaca.
+    closes: list[float] = Field(default_factory=list)
+    highs: list[float] = Field(default_factory=list)
+    lows: list[float] = Field(default_factory=list)
+    volumes: list[int] = Field(default_factory=list)
