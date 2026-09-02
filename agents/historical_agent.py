@@ -92,6 +92,7 @@ class HistoricalAgent(BaseAgent):
         "calculate_atr",
         "calculate_adx",
         "calculate_obv",
+        "calculate_stochastic",
         "identify_support_resistance",
         "identify_trend",
         "detect_chart_patterns",
