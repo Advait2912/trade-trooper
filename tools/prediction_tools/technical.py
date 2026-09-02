@@ -191,8 +191,7 @@ def calculate_technical_indicators(
     adx_dict = technical.get("calculate_adx") or {}
     bb_dict = technical.get("calculate_bollinger_bands") or {}
     obv_dict = technical.get("calculate_obv") or {}
-    # Stochastic is not pre-computed in Phase 1; fall back to neutral.
-    stoch_dict: dict[str, Any] = {}
+    stoch_dict = technical.get("calculate_stochastic") or {}
 
     rsi_score = _score_rsi(rsi_dict)
     macd_score = _score_macd(macd_dict)

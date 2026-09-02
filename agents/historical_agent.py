@@ -40,6 +40,7 @@ from tools.historical.indicators import (
     calculate_moving_averages,
     calculate_obv,
     calculate_rsi,
+    calculate_stochastic,
 )
 from tools.historical.levels import (
     detect_chart_patterns,
@@ -244,6 +245,7 @@ def _compute_answer(
         "calculate_atr": calculate_atr(highs, lows, closes),
         "calculate_adx": calculate_adx(highs, lows, closes),
         "calculate_obv": calculate_obv(closes, volumes),
+        "calculate_stochastic": calculate_stochastic(highs, lows, closes),
     }
 
     levels_result = identify_support_resistance(bar_dicts)
