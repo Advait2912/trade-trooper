@@ -199,6 +199,11 @@ class HistoricalAgent(BaseAgent):
             patterns=computed["patterns"],
             summary=computed["summary"],
             errors=errors,
+            # Raw arrays for Phase 2 re-use (same data, no extra fetch)
+            closes=computed["closes"],
+            highs=computed["highs"],
+            lows=computed["lows"],
+            volumes=computed["volumes"],
         )
 
 
@@ -309,4 +314,9 @@ def _compute_answer(
         "levels": levels_result,
         "patterns": patterns_result["patterns_found"],
         "summary": {**summary_result, "events": events_result["events"]},
+        # Raw arrays passed through for Phase 2 use
+        "closes": closes,
+        "highs": highs,
+        "lows": lows,
+        "volumes": volumes,
     }
