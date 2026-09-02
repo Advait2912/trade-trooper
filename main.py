@@ -17,6 +17,7 @@ from agents.historical_agent import HistoricalAgent
 from orchestrator.pipeline import Pipeline
 from schemas.historical import HistoricalAgentResult
 from schemas.pipeline import FinalReport
+from schemas.risk import RiskResult
 from utils.config import ConfigError, load_settings, validate_ticker
 from utils.logging import setup_logging
 
@@ -88,6 +89,37 @@ def render_historical(result: HistoricalAgentResult) -> str:
         for e in result.errors:
             lines.append(f"- {e}")
     return "\n".join(lines)
+
+
+def _render_risk(risk: RiskResult) -> list[str]:
+    """Human-readable PHASE 3 risk block."""
+    lines = ["PHASE 3 — RISK", "-" * 13, f"Status: {risk.status}"]
+    lines.append(f"Risk level: {risk.risk_level} (score {risk.risk_score:.0f}/100)")
+    lines.append(f"IV: {risk.iv_used:.1f}% ({risk.iv_source}; greeks via {risk.greeks_source})")
+    if risk.spread_pct:
+        lines.append(f"Bid/ask spread: {risk.spread_pct * 100:.1f}%")
+    if risk.implied_move_pct:
+        lines.append(f"Market-implied move: {risk.implied_move_pct * 100:.2f}%")
+    if risk.theta_per_day:
+        lines.append(f"Theta/day: {risk.theta_per_day:.4f}")
+    lines.append(f"Stop: ${risk.stop_loss_level:.2f}")
+    lines.append(f"Target: ${risk.take_profit_level:.2f}")
+    lines.append(f"Risk/reward: {risk.risk_reward_ratio:.2f}")
+    rec = risk.position_recommendation
+    lines.append(
+        f"Position: {rec.equity.shares:.0f} shares (${rec.equity.dollar_value:,.0f}) / "
+        f"{rec.option.contracts:.0f} contracts (premium risk ${rec.option.premium_risk:,.0f})"
+    )
+    lines.append(f"Capital at risk: {risk.capital_at_risk_pct * 100:.2f}%")
+    lines.append(
+        f"Max loss: ${risk.max_loss_dollars:,.0f} ({risk.max_loss_pct * 100:.2f}%)"
+    )
+    if risk.tail_var_dollars:
+        lines.append(
+            f"Tail: VaR ${risk.tail_var_dollars:,.0f} / CVaR ${risk.tail_cvar_dollars:,.0f}"
+        )
+    lines.append("")
+    return lines
 
 
 def render_report(report: FinalReport, verbose: bool = False) -> str:
@@ -165,7 +197,7 @@ def render_report(report: FinalReport, verbose: bool = False) -> str:
         lines.append(f"Technical signal: {summary}")
         lines.append("")
 
-    phs = [("PHASE 2", report.prediction), ("PHASE 3", report.risk), ("PHASE 4", report.decision)]
+    phs = [("PHASE 2", report.prediction), ("PHASE 4", report.decision)]
     for label, ph in phs:
         lines.append(label)
         lines.append("-" * len(label))
@@ -173,6 +205,8 @@ def render_report(report: FinalReport, verbose: bool = False) -> str:
         if ph.summary:
             lines.append(ph.summary)
         lines.append("")
+
+    lines.extend(_render_risk(report.risk))
 
     a = report.analysis
     lines.append("ASSESSMENT")

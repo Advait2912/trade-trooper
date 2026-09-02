@@ -50,7 +50,7 @@ async def test_price_history_parses_bars_and_passes_params(settings):
     request = param_calls[0].request
     assert request.url.params["timeframe"] == "1Day"
     assert request.url.params["adjustment"] == "split"
-    assert request.url.params["sort"] == "asc"
+    assert request.url.params["sort"] == "desc"
 
 
 @respx.mock

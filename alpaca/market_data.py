@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -42,11 +42,14 @@ async def get_daily_bars(
         "limit": limit,
         "adjustment": "raw",
         "feed": feed,
-        "sort": "asc",
+        "sort": "desc",
+        "start": (date.today() - timedelta(days=limit * 2)).isoformat(),
+        "end": date.today().isoformat(),
     }
     payload = await client.get_json(f"/v2/stocks/{symbol}/bars", params=params)
-    bars = payload.get("bars", []) if isinstance(payload, dict) else []
-    return [b for b in bars if isinstance(b, dict)]
+    bars = (payload.get("bars") or []) if isinstance(payload, dict) else []
+    bars = [b for b in bars if isinstance(b, dict)]
+    return list(reversed(bars))  # ascending chronological order
 
 
 def compute_market_data(

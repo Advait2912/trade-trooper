@@ -42,6 +42,13 @@ from schemas.pipeline import (
     WebResearch,
     WebSource,
 )
+from schemas.risk import (
+    EquityPosition,
+    Greeks,
+    OptionPosition,
+    PositionRecommendation,
+    RiskResult,
+)
 
 __all__ = [
     "Actionability",
@@ -56,6 +63,10 @@ __all__ = [
     "FetchedPage",
     "FinalReport",
     "FinalSynthesis",
+    "Greeks",
+    "EquityPosition",
+    "OptionPosition",
+    "PositionRecommendation",
     "HistoricalAgentResult",
     "InitialAnalysis",
     "MarketContext",
@@ -66,6 +77,7 @@ __all__ = [
     "NewsRef",
     "PhaseResult",
     "PriceBar",
+    "RiskResult",
     "SearchResult",
     "Sentiment",
     "SourceRelevance",

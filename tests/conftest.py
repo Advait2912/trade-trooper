@@ -27,6 +27,9 @@ BARS_URL_RE = re.compile(r"https://data\.alpaca\.markets/v2/stocks/.*/bars.*")
 CORPORATE_ACTIONS_URL_RE = re.compile(
     r"https://data\.alpaca\.markets/v2/stocks/.*/corporate_actions.*"
 )
+OPTIONS_CHAIN_URL_RE = re.compile(
+    r"https://data\.alpaca\.markets/v1beta1/options/snapshots/.*"
+)
 CHAT_URL = "http://localhost:11434/api/chat"
 WEB_SEARCH_URL = "http://localhost:11434/api/experimental/web_search"
 WEB_FETCH_URL = "http://localhost:11434/api/experimental/web_fetch"
@@ -123,7 +126,9 @@ def mock_market_data(symbol: str = "NVDA") -> None:
         return_value=httpx.Response(200, json=snapshot)
     )
     respx.get(BARS_URL_RE).mock(
-        return_value=httpx.Response(200, json={"bars": bars, "symbol": symbol})
+        return_value=httpx.Response(
+            200, json={"bars": list(reversed(bars)), "symbol": symbol}
+        )
     )
 
 
@@ -187,9 +192,15 @@ def _dividend_payload(symbol: str, amounts: list[float], years: int = 5) -> dict
 
 
 def mock_historical(symbol: str = "NVDA", bars: Optional[dict] = None, dividends: Optional[dict] = None) -> None:
-    """Mock the bars + corporate-actions endpoints used by HistoricalAgent."""
+    """Mock the bars + corporate-actions endpoints used by HistoricalAgent.
+
+    The bars endpoint mirrors the real API's ``sort=desc`` behaviour (newest
+    first); the data layer reverses it back to ascending order.
+    """
+    data = dict(bars or {"bars": historical_bars(symbol)})
+    data["bars"] = list(reversed(data.get("bars") or []))
     respx.get(BARS_URL_RE).mock(
-        return_value=httpx.Response(200, json=dict(bars or {"bars": historical_bars(symbol)}))
+        return_value=httpx.Response(200, json=data)
     )
     respx.get(CORPORATE_ACTIONS_URL_RE).mock(
         return_value=httpx.Response(200, json=dividends or _dividend_payload(symbol, [1.25, 1.25, 1.3]))
@@ -199,6 +210,37 @@ def mock_historical(symbol: str = "NVDA", bars: Optional[dict] = None, dividends
 def mock_historical_error(status: int = 500) -> None:
     respx.get(BARS_URL_RE).mock(return_value=httpx.Response(status))
     respx.get(CORPORATE_ACTIONS_URL_RE).mock(return_value=httpx.Response(status))
+
+
+# ---------------------------------------------------------------------------
+# Options chain mock helpers (Phase 3 Risk Agent)
+# ---------------------------------------------------------------------------
+def _options_chain_payload(symbol: str = "NVDA") -> dict:
+    return {
+        "next_page_token": None,
+        "snapshots": {
+            f"{symbol}260918C00150000": {
+                "greeks": {"delta": 0.55, "gamma": 0.03, "theta": -0.10, "vega": 0.12, "rho": 0.02},
+                "impliedVolatility": 0.35,
+                "latestQuote": {"bp": 4.20, "ap": 4.40, "bs": 100, "as": 100},
+            },
+            f"{symbol}260918P00150000": {
+                "greeks": {"delta": -0.45, "gamma": 0.03, "theta": -0.09, "vega": 0.12, "rho": -0.02},
+                "impliedVolatility": 0.36,
+                "latestQuote": {"bp": 3.90, "ap": 4.10, "bs": 100, "as": 100},
+            },
+        },
+    }
+
+
+def mock_options_chain(symbol: str = "NVDA") -> None:
+    respx.get(OPTIONS_CHAIN_URL_RE).mock(
+        return_value=httpx.Response(200, json=_options_chain_payload(symbol))
+    )
+
+
+def mock_options_unavailable(status: int = 403) -> None:
+    respx.get(OPTIONS_CHAIN_URL_RE).mock(return_value=httpx.Response(status))
 
 
 # ---------------------------------------------------------------------------

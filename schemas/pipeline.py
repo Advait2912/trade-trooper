@@ -19,6 +19,7 @@ from schemas.common import (
 )
 from schemas.historical import HistoricalAgentResult
 from schemas.prediction import PredictionResult
+from schemas.risk import RiskResult
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +141,7 @@ class FinalReport(BaseModel):
     prediction: PredictionResult = Field(
         default_factory=lambda: PredictionResult(status="not_implemented")
     )
-    risk: PhaseResult = Field(default_factory=lambda: PhaseResult(phase="risk"))
+    risk: RiskResult = Field(default_factory=lambda: RiskResult())
     decision: PhaseResult = Field(default_factory=lambda: PhaseResult(phase="decision"))
     analysis: Analysis = Field(default_factory=lambda: Analysis())
     council_input: CouncilInput = Field(default_factory=lambda: CouncilInput())

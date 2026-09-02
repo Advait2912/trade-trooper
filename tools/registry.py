@@ -302,6 +302,11 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
         "agent": "risk",
         "description": "Calculate maximum loss",
     },
+    "calculate_risk_score": {
+        "phase": 3,
+        "agent": "risk",
+        "description": "Aggregate risk signals into a 0-100 composite risk score",
+    },
     # ------------------------------------------------------------------
     # Phase 4 - Decision Agent (placeholder)
     # ------------------------------------------------------------------
@@ -358,6 +363,10 @@ def import_handlers(tool_names: list[str] | None = None) -> dict[str, Callable[.
         "calculate_returns": "tools.historical.risk_stats",
         "generate_technical_summary": "tools.historical.summary",
         "identify_trading_events": "tools.historical.events",
+        "calculate_greeks": "tools.risk_tools.greeks",
+        "calculate_position_size": "tools.risk_tools.position_size",
+        "calculate_max_loss": "tools.risk_tools.max_loss",
+        "calculate_risk_score": "tools.risk_tools.risk_score",
     }
 
     wanted = list(tool_names) if tool_names is not None else list(TOOL_SPECS)

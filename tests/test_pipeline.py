@@ -16,6 +16,7 @@ from tests.conftest import (
     mock_news_error,
     mock_ollama,
     mock_ollama_unavailable,
+    mock_options_chain,
     mock_web_research_full,
     mock_web_search_error,
 )
@@ -30,6 +31,7 @@ async def _run(settings):
 async def test_bullish_news_full_pipeline(settings):
     mock_news(["Nvidia signs a major new GPU supply agreement"])
     mock_market_data("NVDA")
+    mock_options_chain("NVDA")
     mock_ollama()
     mock_web_research_full()
 
@@ -40,6 +42,7 @@ async def test_bullish_news_full_pipeline(settings):
     assert report.analysis.news_impact > 0
     assert report.web_research.performed is True
     assert report.market_context.price > 0
+    assert report.risk.status in {"ok", "partial"}
 
 
 @respx.mock
@@ -62,6 +65,7 @@ async def test_bearish_news(settings):
 
     mock_news(["Nvidia faces a major export ban"])
     mock_market_data("NVDA")
+    mock_options_chain("NVDA")
     mock_ollama(initial=bearish_initial, final=bearish_final)
     mock_web_research_full()
 
@@ -100,6 +104,7 @@ async def test_ambiguous_headline(settings):
 
     mock_news(["Nvidia makes an announcement"])
     mock_market_data("NVDA")
+    mock_options_chain("NVDA")
     mock_ollama(initial=ambiguous_initial, final=ambiguous_final)
 
     report = await _run(settings)
@@ -129,6 +134,7 @@ async def test_alpaca_api_failure(settings):
 async def test_ollama_unavailable(settings):
     mock_news(["Nvidia signs a major new GPU supply agreement"])
     mock_market_data("NVDA")
+    mock_options_chain("NVDA")
     mock_ollama_unavailable(500)
 
     report = await _run(settings)
@@ -140,6 +146,7 @@ async def test_ollama_unavailable(settings):
 async def test_web_search_failure(settings):
     mock_news(["Nvidia signs a major new GPU supply agreement"])
     mock_market_data("NVDA")
+    mock_options_chain("NVDA")
     mock_ollama()  # initial analysis says needs_web_research=True
     mock_web_search_error(500)
 

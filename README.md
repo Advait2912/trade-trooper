@@ -32,10 +32,11 @@ PHASE 2 (Sequential prediction - 3 seconds):
       └─ Returns: price_forecast, iv_forecast, confidence
 
 PHASE 3 (Sequential risk - 2 seconds):
-  └─ Risk Agent (input: Phase 2 predictions)            [placeholder]
-      ├─ Calls: calculate_greeks()
-      ├─ Calls: calculate_position_size()
-      ├─ Calls: calculate_max_loss()
+  └─ Risk Agent (input: Phase 2 predictions)
+      ├─ Calls: calculate_greeks()          (option chain greeks + IV, BS fallback)
+      ├─ Calls: calculate_position_size()   (equity + option, risk-scaled)
+      ├─ Calls: calculate_max_loss()        (stop + gap-inflated + VaR/CVaR tail)
+      ├─ Calls: calculate_risk_score()      (composite 0-100 → risk level)
       └─ Returns: risk_metrics, position_recommendation
 
 PHASE 4 (Sequential decision - 1 second):
@@ -54,11 +55,11 @@ The orchestrator (`orchestrator/pipeline.py`) additionally runs web research
 
 | Module | Purpose |
 |-------|---------|
-| `agents/` | The 6 agents (phase 1 collection; phase 2-4 placeholders) + LLM client |
+| `agents/` | The 6 agents (phase 1 collection; phase 2-3 implemented; phase 4 placeholder) + LLM client |
 | `tools/` | Deterministic tool suite + `registry.py` (tool specs) |
-| `schemas/` | Pydantic models (news / market / historical / pipeline) |
+| `schemas/` | Pydantic models (news / market / historical / prediction / risk / pipeline) |
 | `orchestrator/` | Phase-based pipeline + phase timing budgets |
-| `alpaca/` | Alpaca data layer (news, market data, historical) |
+| `alpaca/` | Alpaca data layer (news, market data, historical, options) |
 | `web/` | Web research (Ollama search/fetch) |
 | `utils/` | Config, logging, stage timing |
 
@@ -69,6 +70,14 @@ history, dividends, and rolling realized volatility from Alpaca and produces
 patterns, volatility regimes, drawdown/VaR, gaps, events and a signal-voting
 summary. Alpaca has no earnings endpoint — `get_earnings_history` is a
 documented stub, and earnings-like events are inferred from bar signatures.
+
+The **Risk Agent** (Phase 3, implemented) fetches the option chain via
+`GET /v1beta1/options/snapshots/{symbol}` (real greeks + implied volatility +
+bid/ask) and computes a stop (ATR + support), target, position size (equity and
+long-only options, scaled by confidence / IV quality / spread / drawdown), a
+gap-inflated max loss with a VaR/CVaR tail, and a composite 0–100 risk score.
+When the options feed is unavailable (no subscription) it degrades gracefully
+to Phase 2's estimated IV and local Black-Scholes greeks.
 
 ---
 
@@ -96,6 +105,11 @@ Copy `.env.example` to `.env` and fill in your keys:
 | `ALPACA_API_KEY` | yes | Alpaca API key ID |
 | `ALPACA_API_SECRET` | yes | Alpaca API secret |
 | `ALPACA_DATA_FEED` | no | `iex` (free) or `sip` (paid); default `iex` |
+| `ALPACA_OPTIONS_FEED` | no | `indicative` (free, delayed) or `opra` (paid); default `indicative` |
+| `ACCOUNT_CAPITAL` | no | capital base for position sizing; default `100000` |
+| `RISK_PER_TRADE_PCT` | no | fraction of capital risked per trade; default `0.01` |
+| `MAX_POSITION_PCT` | no | cap on position as a fraction of capital; default `0.05` |
+| `MIN_RISK_REWARD` | no | minimum reward/risk surfaced to the Decision Agent; default `1.0` |
 | `OLLAMA_BASE_URL` | no | local Ollama base URL (default `http://localhost:11434`) |
 | `OLLAMA_MODEL` | no | model tag (default `gemma4:e4b`) |
 | `OLLAMA_API_KEY` | no* | API key for Ollama web search (or run `ollama signin`) |

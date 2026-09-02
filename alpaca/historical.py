@@ -83,11 +83,14 @@ async def get_price_history(
         "limit": _limit_for(interval, days_back),
         "adjustment": "split",
         "feed": feed,
-        "sort": "asc",
+        "sort": "desc",
+        "start": (date.today() - timedelta(days=max(days_back * 2, 10))).isoformat(),
+        "end": date.today().isoformat(),
     }
     payload = await client.get_json(f"/v2/stocks/{symbol}/bars", params=params)
-    bars = payload.get("bars", []) if isinstance(payload, dict) else []
-    return [bar for bar in (parse_price_bar(b) for b in bars) if bar is not None]
+    bars = (payload.get("bars") or []) if isinstance(payload, dict) else []
+    parsed = [bar for bar in (parse_price_bar(b) for b in bars) if bar is not None]
+    return list(reversed(parsed))  # ascending chronological order
 
 
 def parse_price_bar(row: Any) -> PriceBar | None:

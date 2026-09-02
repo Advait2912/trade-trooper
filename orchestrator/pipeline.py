@@ -55,6 +55,7 @@ from schemas.pipeline import (
     WebSource,
 )
 from schemas.prediction import PredictionResult
+from schemas.risk import RiskResult
 from utils.config import ConfigError, Settings
 from utils.logging import PipelineClock, StageTimer
 from web.search import WebResearcher, generate_queries
@@ -125,9 +126,9 @@ class Pipeline:
             prediction = await prediction_agent.run(phase1)
 
         # ---------------------------------------------------------------
-        # PHASE 3 — sequential risk (placeholder)
+        # PHASE 3 — sequential risk (options chain + deterministic sizing)
         # ---------------------------------------------------------------
-        risk_agent = RiskAgent()
+        risk_agent = RiskAgent(self.settings)
         with StageTimer("Phase 3 - risk", log):
             risk = await risk_agent.run(phase1, prediction)
 
@@ -308,7 +309,7 @@ class Pipeline:
         historical: HistoricalAgentResult,
         synthesis: FinalSynthesis | None,
         prediction: PredictionResult,
-        risk: PhaseResult,
+        risk: RiskResult,
         decision: PhaseResult,
     ) -> FinalReport:
         now = datetime.now(timezone.utc).isoformat()
