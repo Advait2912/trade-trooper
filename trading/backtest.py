@@ -62,11 +62,12 @@ from tools.historical.volatility import (
     detect_volatility_regimes,
 )
 from tools.prediction_tools.price_move import estimate_price_move
-from tools.prediction_tools.technical import calculate_technical_indicators
+from tools.prediction_tools.technical import apply_news_adjustment, calculate_technical_indicators
 from tools.prediction_tools.volatility_forecast import forecast_volatility
 from tools.risk_tools.greeks import black_scholes_price
 from trading.journal import TradeJournal
-from tuning import TuningConfig
+from trading.news_cache import NewsCache
+from tuning import DEFAULT_TUNING, TuningConfig
 from utils.config import Settings
 
 log = logging.getLogger("market_intel_agent.backtest")
@@ -78,15 +79,33 @@ _START_EQUITY = 100_000.0
 _RFR = 0.045
 
 
-def _predict(bundle: Phase1Bundle, tuning: TuningConfig | None = None) -> PredictionResult:
-    """News-neutral Phase 2 replica (no LLM)."""
+def _predict(
+    bundle: Phase1Bundle,
+    tuning: TuningConfig | None = None,
+    day_sentiment: dict[str, Any] | None = None,
+) -> PredictionResult:
+    """Phase 2 replica — news-neutral unless ``day_sentiment`` is supplied."""
     tech = calculate_technical_indicators(bundle.historical.technical or {}, tuning=tuning)
     vol = forecast_volatility(
         bundle.historical.volatility or {}, bundle.historical.historical_trends or {}, tuning=tuning
     )
+
+    momentum = tech["momentum_score"]
+    adjusted = momentum
+    news_label = "uncertain"
+    news_score = 0.0
+    news_adjustment = 0.0
+    if day_sentiment:
+        news_label = str(day_sentiment.get("label", "uncertain"))
+        news_score = float(day_sentiment.get("score", 0.0) or 0.0)
+        t = tuning or DEFAULT_TUNING
+        news_adjustment, adjusted = apply_news_adjustment(
+            momentum, news_label, news_score, news_weight=t.news_weight
+        )
+
     move = estimate_price_move(
         market=bundle.market,
-        adjusted_momentum=tech["momentum_score"],
+        adjusted_momentum=adjusted,
         adx_trend_strength=tech["adx_trend_strength"],
         vol_regime=vol["vol_regime"],
         mean_reversion_score=vol["mean_reversion_score"],
@@ -102,8 +121,8 @@ def _predict(bundle: Phase1Bundle, tuning: TuningConfig | None = None) -> Predic
         vol_regime=vol["vol_regime"],
         vol_percentile=vol["vol_percentile"],
         composite_signal=tech["composite_signal"],
-        momentum_score=tech["momentum_score"],
-        adjusted_momentum=tech["momentum_score"],
+        momentum_score=momentum,
+        adjusted_momentum=adjusted,
         confidence=move["confidence"],
         rsi_signal=tech["rsi_signal"],
         macd_signal=tech["macd_signal"],
@@ -112,6 +131,9 @@ def _predict(bundle: Phase1Bundle, tuning: TuningConfig | None = None) -> Predic
         bollinger_regime=tech["bollinger_regime"],
         obv_confirmation=tech["obv_confirmation"],
         mean_reversion_score=vol["mean_reversion_score"],
+        news_sentiment=news_label,
+        news_sentiment_score=news_score,
+        news_adjustment=news_adjustment,
     )
 
 
@@ -155,11 +177,17 @@ def _hist_from_bars(bars: list[Any]) -> dict[str, Any]:
     }
 
 
-def _bundle(ticker: str, bars: list[Any], hist: dict[str, Any]) -> Phase1Bundle:
+def _bundle(
+    ticker: str,
+    bars: list[Any],
+    hist: dict[str, Any],
+    day_sentiment: dict[str, Any] | None = None,
+) -> Phase1Bundle:
     spot = float(bars[-1].close)
     atr = float(hist["technical"]["calculate_atr"]["atr"] or 0.0)
+    sentiment_score = float(day_sentiment.get("score", 0.0) or 0.0) if day_sentiment else 0.0
     return Phase1Bundle(
-        news=NewsCollectionResult(ticker=ticker, sentiment_score=0.0),
+        news=NewsCollectionResult(ticker=ticker, sentiment_score=sentiment_score),
         market=MarketData(price=spot, atr14=atr),
         historical=HistoricalAgentResult(
             symbol=ticker, bars_count=len(bars),
@@ -241,18 +269,22 @@ async def run_backtest(
     journal: TradeJournal | None = None,
     tuning: TuningConfig | None = None,
     bars: list[Any] | None = None,
+    news_cache: NewsCache | None = None,
 ) -> dict[str, Any]:
     """Run a deterministic backtest and journal every cycle + simulated trade.
 
     ``tuning`` optionally overrides the deterministic weights so the tuning
     harness can sweep a grid without editing code.  ``bars`` may be supplied to
     skip the (network) fetch — used by the harness to reuse one fetch across
-    many configs.
+    many configs.  ``news_cache`` supplies per-day historical sentiment (FinBERT);
+    when absent the backtest is news-neutral.
     """
     journal = journal or TradeJournal("backtest_journal.db")
     days_back = _WARMUP + int(_DAY * max(1, months) / 12.0)
     if bars is None:
         bars = await _fetch_bars(settings, ticker, days_back)
+
+    daily_map = news_cache.load_daily_map(ticker) if news_cache is not None else {}
 
     if len(bars) < _WARMUP + 10:
         return {"summary": f"Insufficient history for {ticker} ({len(bars)} bars).",
@@ -266,9 +298,11 @@ async def run_backtest(
         window = bars[: i + 1]
         nxt = bars[i + 1]
         if active is None:
+            day = str(window[-1].date)[:10]
+            day_sentiment = daily_map.get(day)
             hist = _hist_from_bars(window)
-            bundle = _bundle(ticker, window, hist)
-            prediction = _predict(bundle, tuning)
+            bundle = _bundle(ticker, window, hist, day_sentiment)
+            prediction = _predict(bundle, tuning, day_sentiment)
             risk = _risk_compute(bundle, prediction, [], settings, [], tuning)
             decision = _decision_decide(bundle, prediction, risk, settings, [], tuning)
 

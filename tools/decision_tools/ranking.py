@@ -64,6 +64,8 @@ def calculate_opportunity_score(
     )
 
     score = signal_component + rr_component + risk_component + exec_component
+    if candidate.get("instrument") == "equity":
+        score += t.equity_score_boost
     score = _clamp(score, 0.0, 100.0)
 
     return {

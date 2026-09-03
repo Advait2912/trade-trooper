@@ -87,7 +87,7 @@ def render_stats(journal_path: str | Path) -> str:
     lines.append(f"Trades: {stats['trade_count']}  |  Cycles: {stats['cycle_count']}")
     lines.append(f"Win rate: {stats['win_rate'] * 100:.1f}%")
     pf = stats["profit_factor"]
-    lines.append(f"Profit factor: {'∞' if pf == float('inf') else round(pf, 2)}")
+    lines.append(f"Profit factor: {'inf' if pf == float('inf') else round(pf, 2)}")
     lines.append(f"Avg win: ${stats['avg_win']:,.2f}  |  Avg loss: ${stats['avg_loss']:,.2f}")
     lines.append(f"Expectancy: ${stats['expectancy']:,.2f} per trade")
     lines.append(f"Max drawdown (realized): ${stats['max_drawdown']:,.2f}")

@@ -231,9 +231,10 @@ def _build_candidates(
     iv_quality = 1.0 if risk.greeks_source == "alpaca_option_chain" else 0.5
 
     candidates: list[dict[str, Any]] = []
+    equity_only = (tuning or TuningConfig()).equity_only
 
     # long call (bullish instrument) — sized by Phase 3
-    if composite_bias == "bullish" and opt.contracts > 0:
+    if not equity_only and composite_bias == "bullish" and opt.contracts > 0:
         candidates.append(
             _candidate("call", spot, risk, matches=True, confidence=cand_confidence,
                        contracts=opt.contracts, premium_risk=opt.premium_risk,
@@ -243,7 +244,7 @@ def _build_candidates(
     # long put (bearish instrument) — sized here with Phase 3's tool.
     # The tool only needs a valid stop (any distance) to compute the option
     # premium risk; the candidate's *displayed* put stop is mirrored above.
-    if composite_bias == "bearish" and put_premium > 0 and put_delta > 0:
+    if not equity_only and composite_bias == "bearish" and put_premium > 0 and put_delta > 0:
         put_size = calculate_position_size(
             capital=settings.account_capital,
             risk_per_trade_pct=settings.risk_per_trade_pct,

@@ -143,6 +143,12 @@ class TuningConfig:
     spread_full_at: float = 0.15      # spread fraction that zeroes execution
     execution_fallback_mult: float = 0.6  # greeks_source fallback multiplier
 
+    # ------------------------------------------------------------------
+    # Phase 4 — instrument preference (long options carry theta + spread)
+    # ------------------------------------------------------------------
+    equity_only: bool = False         # True -> only build the long-equity candidate
+    equity_score_boost: float = 0.0   # added to equity candidates' opportunity score
+
     def to_dict(self) -> dict:
         """Return a flat dict of all knobs (for serialization / display)."""
         return asdict(self)
@@ -164,3 +170,53 @@ class TuningConfig:
 
 # Convenience default used by tool functions when no tuning is supplied.
 DEFAULT_TUNING = TuningConfig()
+
+
+# Named preset overrides, usable via ``scripts/tune.py --preset NAME``.  Values
+# may be TuningConfig fields or Settings fields (gates/sizing); the harness
+# routes them accordingly.
+PRESETS: dict[str, dict] = {
+    "default": {},
+    "equity_only": {"equity_only": True},
+    "conservative": {"min_confidence": 0.50, "min_risk_reward": 1.25},
+    "aggressive": {"min_confidence": 0.30, "min_risk_reward": 0.75},
+    "signal_prediction_led": {
+        "signal_weights": {
+            "news_sentiment": 0.10,
+            "technical_summary": 0.20,
+            "historical_trend": 0.10,
+            "prediction_signal": 0.50,
+            "market_trend": 0.10,
+        },
+    },
+    "signal_technical_led": {
+        "signal_weights": {
+            "news_sentiment": 0.10,
+            "technical_summary": 0.40,
+            "historical_trend": 0.10,
+            "prediction_signal": 0.25,
+            "market_trend": 0.15,
+        },
+    },
+    "tuned": {
+        "equity_only": True,
+        "min_confidence": 0.3589769763094654,
+        "min_risk_reward": 1.2448794246808945,
+        "trade_horizon_days": 3,
+        "momentum_weights": {
+            "macd": 0.135791,
+            "adx": 0.242160,
+            "rsi": 0.202523,
+            "bollinger": 0.121021,
+            "obv": 0.233844,
+            "stochastic": 0.064660,
+        },
+        "signal_weights": {
+            "news_sentiment": 0.253104,
+            "technical_summary": 0.182606,
+            "historical_trend": 0.192505,
+            "prediction_signal": 0.258161,
+            "market_trend": 0.113623,
+        },
+    },
+}

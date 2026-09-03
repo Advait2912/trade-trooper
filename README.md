@@ -210,25 +210,44 @@ per-instrument breakdown and the latest equity snapshot.
 ### Tuning harness
 
 Every numeric weight/threshold in Phases 2-4 lives in `tuning.py`
-(`TuningConfig`). `scripts/tune.py` sweeps them against the backtest so they
-can be fitted rather than hand-edited:
+(`TuningConfig`). `scripts/tune.py` evaluates/sweeps/optimizes them against the
+backtest:
 
 ```bash
 # baseline over a diversified universe (fetches bars once per ticker)
 python scripts/tune.py evaluate --universe NVDA,AMD,SPY --months 12
 
-# sweep a grid of knobs (JSON maps knob -> list of candidate values)
-python scripts/tune.py sweep --grid grid.json --months 12 --max-dd-cap 0.15
+# inline overrides: --set key=value fixes it, --set key=v1,v2 sweeps it
+python scripts/tune.py sweep --preset equity_only \
+    --set min_confidence=0.35,0.5 --set min_risk_reward=1.0,1.5
+
+# learn weights with Optuna (TPE) against a PF/win-rate/expectancy loss
+python scripts/tune.py optimize --universe NVDA,AMD,SPY --n-trials 100 \
+    --validate-universe TSLA,TLT --news-cache news_cache.db
 ```
 
-Keys in a grid may be any `TuningConfig` field (e.g. `momentum_weights`,
-`signal_weights`, `factor_weights`, `news_weight`, `min_confidence`) or any
-`Settings` field (gates/sizing). Output is a table of aggregated profit factor,
-expectancy, win rate and max drawdown, ranked by expectancy.
+Keys may be any `TuningConfig` field (`momentum_weights`, `signal_weights`,
+`factor_weights`, `news_weight`, ...) or any `Settings` field (gates/sizing).
+`--preset` applies a named override (`default`, `equity_only`, `conservative`,
+`aggressive`, `signal_prediction_led`, `signal_technical_led`).
 
 The backtest prices options with Black-Scholes (Phase 3 estimated IV, constant
 over the holding period) so option P&L reflects premium/delta/gamma/theta
 rather than a raw `underlying × 100` proxy.
+
+### News-aware backtesting
+
+The backtest is news-neutral by default. To backtest *with* news, build a
+historical sentiment cache (FinBERT on GPU; requires `requirements-ml.txt`):
+
+```bash
+python scripts/build_news_cache.py NVDA,AMD,SPY --start 2025-01-01 --end 2026-01-01
+```
+
+Then pass `--news-cache news_cache.db` to `evaluate`/`sweep`/`optimize`. Each
+article is scored once with FinBERT (`P(pos) − P(neg)`), aggregated per trading
+day with a 24-hour lookback ending at the close (no look-ahead), and fed into
+the Phase 2 news adjustment and the Phase 4 news-sentiment vote.
 
 ## Risk assessment and alternatives
 
