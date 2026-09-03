@@ -83,6 +83,16 @@ class TestCalculateGreeks:
         assert result["spread_pct"] > 0.0
         assert result["implied_move_pct"] > 0.0
 
+    def test_chain_occ_symbols_exposed(self):
+        result = calculate_greeks(_CHAIN, 150.0, 30.0, 5)
+        assert result["call_symbol"] == "NVDA260918C00150000"
+        assert result["put_symbol"] == "NVDA260918P00150000"
+
+    def test_fallback_occ_symbols_empty(self):
+        result = calculate_greeks([], 150.0, 30.0, 5)
+        assert result["call_symbol"] == ""
+        assert result["put_symbol"] == ""
+
     def test_fallback_source(self):
         result = calculate_greeks(None, 150.0, 30.0, 5)
         assert result["greeks_source"] == "black_scholes_estimated"
