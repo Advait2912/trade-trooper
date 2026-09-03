@@ -104,13 +104,15 @@ async def manage_and_close(
     qty = float(position.get("qty") or 0.0)
     entry = float(position.get("avg_entry_price") or 0.0)
     mark = float(position.get("mark_price") or 0.0)
-    pnl = round((mark - entry) * qty, 2)
+    is_option = len(symbol) > 6
+    multiplier = 100.0 if is_option else 1.0
+    pnl = round((mark - entry) * qty * multiplier, 2)
     pnl_pct = round((mark - entry) / entry, 4) if entry > 0 else 0.0
     journal.record_trade(
         opened_ts=str(position.get("opened_at") or cycle_ts),
         closed_ts=closed_ts,
         ticker=ticker,
-        instrument="option" if len(symbol) > 6 else "equity",
+        instrument="option" if is_option else "equity",
         option_type="call" if "C" in symbol[-8:].upper() else ("put" if "P" in symbol[-8:].upper() else ""),
         symbol=symbol,
         quantity=qty,

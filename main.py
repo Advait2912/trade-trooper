@@ -2,8 +2,10 @@
 
 Usage:
     python main.py NVDA                       # full 4-phase pipeline
-    python main.py NVDA --historical          # Phase 1 historical agent only
-    python main.py NVDA --news-limit 5 --lookback-hours 24 --verbose
+    python main.py NVDA --historical          # Phase 1 Historical Data Agent only
+    python main.py NVDA --trade               # paper-trading loop (kill-switched)
+    python main.py NVDA --backtest --months 6 # deterministic Phase 2-4 replay
+    python main.py --stats                    # trade/backtest statistics report
 """
 
 from __future__ import annotations
@@ -62,11 +64,37 @@ def build_parser() -> argparse.ArgumentParser:
         prog="market_intel_agent",
         description="Agentic market intelligence (Phase 1 collection + Phase 2-4 pipeline).",
     )
-    parser.add_argument("ticker", help="Stock ticker, e.g. NVDA")
+    parser.add_argument("ticker", nargs="?", help="Stock ticker, e.g. NVDA")
     parser.add_argument(
         "--historical",
         action="store_true",
         help="Run only the Phase 1 Historical Data Agent and print its result.",
+    )
+    parser.add_argument(
+        "--trade",
+        action="store_true",
+        help="Run the paper-trading loop (requires TRADING_ENABLED=true).",
+    )
+    parser.add_argument(
+        "--backtest",
+        action="store_true",
+        help="Replay the deterministic Phase 2-4 chain over historical bars.",
+    )
+    parser.add_argument(
+        "--months",
+        type=int,
+        default=6,
+        help="Backtest lookback in months (default 6).",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print the trade/backtest statistics report from the journal.",
+    )
+    parser.add_argument(
+        "--journal",
+        default="trading_journal.db",
+        help="Path to the SQLite journal (default trading_journal.db).",
     )
     parser.add_argument(
         "--news-limit",
@@ -288,10 +316,56 @@ async def _run(ticker: str, args: argparse.Namespace) -> FinalReport:
     return await pipeline.run(ticker)
 
 
+async def _run_trade(ticker: str, args: argparse.Namespace) -> int:
+    from trading.runner import PaperRunner
+
+    settings = load_settings()
+    if not settings.trading_enabled:
+        print("Error: TRADING_ENABLED is false; set it to true in .env to trade.",
+              file=sys.stderr)
+        return 2
+    if settings.alpaca_api_key.startswith("AK"):
+        print("Error: refusing to run against a LIVE trading key (got 'AK' prefix). "
+              "Use a paper key (PK...).", file=sys.stderr)
+        return 2
+
+    runner = PaperRunner(settings, ticker, journal_path=args.journal, verbose=args.verbose)
+    print(f"Paper-trading loop started for {ticker}. Press Ctrl-C to stop.")
+    try:
+        await runner.start()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    return 0
+
+
+async def _run_backtest(ticker: str, args: argparse.Namespace) -> int:
+    from trading.backtest import run_backtest
+    from trading.journal import TradeJournal
+
+    settings = load_settings()
+    journal = TradeJournal(args.journal)
+    result = await run_backtest(
+        settings, ticker, months=args.months, journal=journal,
+    )
+    print(result["summary"])
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     setup_logging(verbose=args.verbose)
+
+    # --stats needs no ticker.
+    if args.stats:
+        from trading.stats import render_stats
+
+        print(render_stats(args.journal))
+        return 0
+
+    if not args.ticker:
+        print("Error: a ticker is required (e.g. NVDA).", file=sys.stderr)
+        return 2
 
     try:
         ticker = validate_ticker(args.ticker)
@@ -306,6 +380,10 @@ def main(argv: list[str] | None = None) -> int:
             print("\nMACHINE-READABLE JSON:")
             print(json.dumps(result.model_dump(), indent=2, default=str))
             return 0
+        if args.trade:
+            return asyncio.run(_run_trade(ticker, args))
+        if args.backtest:
+            return asyncio.run(_run_backtest(ticker, args))
         report = asyncio.run(_run(ticker, args))
     except ConfigError as exc:
         print(f"Error: {exc}", file=sys.stderr)
