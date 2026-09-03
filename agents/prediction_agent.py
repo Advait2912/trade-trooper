@@ -27,6 +27,10 @@ Flow:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tuning import TuningConfig
 
 from schemas.prediction import Phase1Bundle, PredictionResult
 from tools.prediction_tools.price_move import estimate_price_move
@@ -55,7 +59,11 @@ class PredictionAgent:
         "estimate_price_move",
     ]
 
-    async def run(self, phase1: dict | Phase1Bundle) -> PredictionResult:
+    async def run(
+        self,
+        phase1: dict | Phase1Bundle,
+        tuning: TuningConfig | None = None,
+    ) -> PredictionResult:
         """Run Phase 2 prediction.
 
         Parameters
@@ -63,6 +71,8 @@ class PredictionAgent:
         phase1:
             Either the raw dict from ``Pipeline._phase1()`` or a typed
             ``Phase1Bundle``.
+        tuning:
+            Optional ``TuningConfig`` overriding indicator weights.
         """
         # Accept both raw dict and typed bundle
         if isinstance(phase1, dict):
@@ -76,7 +86,7 @@ class PredictionAgent:
             # ------------------------------------------------------------------
             # Step 1: Technical signals (reuse Phase 1 pre-computed indicators)
             # ------------------------------------------------------------------
-            tech = calculate_technical_indicators(bundle.historical.technical)
+            tech = calculate_technical_indicators(bundle.historical.technical, tuning=tuning)
             momentum_score: float = tech["momentum_score"]
 
             # ------------------------------------------------------------------
@@ -96,6 +106,7 @@ class PredictionAgent:
                 momentum_score,
                 news_sentiment_str,
                 news_raw_score,
+                news_weight=(tuning.news_weight if tuning else None),
             )
 
             # ------------------------------------------------------------------
@@ -104,6 +115,7 @@ class PredictionAgent:
             vol = forecast_volatility(
                 bundle.historical.volatility,
                 bundle.historical.historical_trends,
+                tuning=tuning,
             )
 
             # ------------------------------------------------------------------
@@ -115,6 +127,7 @@ class PredictionAgent:
                 adx_trend_strength=tech["adx_trend_strength"],
                 vol_regime=vol["vol_regime"],
                 mean_reversion_score=vol["mean_reversion_score"],
+                tuning=tuning,
             )
 
             if move.get("errors"):

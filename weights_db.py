@@ -20,9 +20,14 @@ Stock-specific overrides live under the reserved ``TICKER_NAMESPACE`` key.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tuning import TuningConfig
+    from utils.config import Settings
 
 DEFAULT_INDUSTRY = "default"
 
@@ -91,3 +96,30 @@ def resolve_overrides(
     if ticker_entry:
         merged.update(ticker_entry)
     return merged
+
+
+def resolve_config(
+    ticker: str,
+    db: dict[str, dict[str, Any]] | None,
+    base_settings: Settings,
+) -> tuple[Settings, TuningConfig]:
+    """Return a per-ticker (Settings clone, TuningConfig) from weights_db.
+
+    Resolution order (later wins):
+        global defaults <- db["default"] <- db[industry] <- db["tickers"][TICKER]
+
+    Falls back cleanly to default TuningConfig when db is None or empty.
+    Settings is shallow-cloned so per-ticker min_confidence / min_risk_reward /
+    trade_horizon_days from the DB don't bleed across tickers in the same cycle.
+    """
+    from tuning import TuningConfig
+
+    overrides = resolve_overrides(ticker, db or {})
+    settings = dataclasses.replace(base_settings)
+    tuning = TuningConfig()
+    for key, value in overrides.items():
+        if hasattr(tuning, key):
+            setattr(tuning, key, value)
+        elif hasattr(settings, key):
+            setattr(settings, key, value)
+    return settings, tuning

@@ -53,7 +53,13 @@ class DecisionAgent(BaseAgent):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    async def run(self, phase1: Any, phase2: Any, phase3: Any) -> DecisionResult:
+    async def run(
+        self,
+        phase1: Any,
+        phase2: Any,
+        phase3: Any,
+        tuning: TuningConfig | None = None,
+    ) -> DecisionResult:
         """Run Phase 4 decision synthesis.
 
         ``phase1`` may be a raw dict (from ``Pipeline._phase1``) or a typed
@@ -80,7 +86,7 @@ class DecisionAgent(BaseAgent):
         errors: list[str] = []
         try:
             return await asyncio.to_thread(
-                _decide, bundle, prediction, risk, self.settings, errors, None
+                _decide, bundle, prediction, risk, self.settings, errors, tuning
             )
         except Exception as exc:  # noqa: BLE001 - degrade gracefully
             log.exception("DecisionAgent failed: %s", exc)

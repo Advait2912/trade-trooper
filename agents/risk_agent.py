@@ -59,7 +59,12 @@ class RiskAgent(BaseAgent):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    async def run(self, phase1: Any, phase2: Any) -> RiskResult:
+    async def run(
+        self,
+        phase1: Any,
+        phase2: Any,
+        tuning: TuningConfig | None = None,
+    ) -> RiskResult:
         """Run Phase 3 risk assessment.
 
         Parameters
@@ -69,6 +74,8 @@ class RiskAgent(BaseAgent):
             ``Phase1Bundle``.
         phase2:
             The ``PredictionResult`` from Phase 2.
+        tuning:
+            Optional ``TuningConfig`` overriding risk parameters.
         """
         if isinstance(phase1, dict):
             bundle = Phase1Bundle.from_phase1_dict(phase1)
@@ -104,7 +111,7 @@ class RiskAgent(BaseAgent):
             errors.append(f"option chain fetch failed: {exc}")
 
         computed = await asyncio.to_thread(
-            _compute_risk, bundle, prediction, chain, self.settings, errors, None
+            _compute_risk, bundle, prediction, chain, self.settings, errors, tuning
         )
         return computed
 
