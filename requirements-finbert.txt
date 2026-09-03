@@ -1,0 +1,6 @@
+# Dependencies for shared FinBERT microservice
+torch>=2.1
+transformers>=4.36
+fastapi>=0.110
+uvicorn>=0.28
+pydantic>=2.6

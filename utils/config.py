@@ -71,6 +71,11 @@ class Settings:
     limit_slippage_pct: float = 0.0     # extra % away from mid for limit fills
     trade_horizon_days: int = 5         # max holding period (calendar days)
 
+    # FinBERT microservice & lean execution flags
+    finbert_url: str = ""               # URL of shared finbert service (e.g. http://finbert:8000)
+    enable_web_research: bool = True    # skip web research when False (Alpaca news is sufficient)
+    enable_llm_synthesis: bool = True   # skip Ollama synthesis when False (deterministic execution)
+
     def __post_init__(self) -> None:
         self._normalize()
 
@@ -181,4 +186,7 @@ def load_settings() -> Settings:
         order_type=order_type,
         limit_slippage_pct=float(_env("LIMIT_SLIPPAGE_PCT", "0")),
         trade_horizon_days=trade_horizon_days,
+        finbert_url=_env("FINBERT_URL", ""),
+        enable_web_research=_env("ENABLE_WEB_RESEARCH", "true").lower() in ("1", "true", "yes"),
+        enable_llm_synthesis=_env("ENABLE_LLM_SYNTHESIS", "true").lower() in ("1", "true", "yes"),
     )

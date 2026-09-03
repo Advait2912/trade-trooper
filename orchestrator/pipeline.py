@@ -59,7 +59,9 @@ from schemas.prediction import PredictionResult
 from schemas.risk import RiskResult
 from utils.config import ConfigError, Settings
 from utils.logging import PipelineClock, StageTimer
+from utils.paths import data_path
 from web.search import WebResearcher, generate_queries
+from weights_db import load_weights_db, resolve_config, resolve_industry
 
 log = logging.getLogger("market_intel_agent.pipeline")
 
@@ -77,8 +79,13 @@ class Pipeline:
         self.verbose = verbose
         self.company_names = company_names or []
         self.clock = PipelineClock()
+        _db_path = data_path("weights_db.json")
+        self._db = load_weights_db(_db_path) if _db_path.exists() else {}
 
     async def run(self, ticker: str) -> FinalReport:
+        import time
+
+        t_start = time.perf_counter()
         if not self.settings.has_alpaca_credentials:
             raise ConfigError(
                 "Missing Alpaca credentials. Set ALPACA_API_KEY and "
@@ -87,11 +94,17 @@ class Pipeline:
 
         self.clock.mark("Starting")
 
+        # Resolve industry-specific settings and tuning for this ticker
+        settings_i, tuning_i = resolve_config(ticker, self._db, self.settings)
+
         # ---------------------------------------------------------------
         # PHASE 1 — parallel data collection (news + market + historical)
         # ---------------------------------------------------------------
+        t_phase1 = time.perf_counter()
         with StageTimer("Phase 1 - parallel data collection", log):
             phase1 = await self._phase1(ticker)
+        phase1_ms = (time.perf_counter() - t_phase1) * 1000
+
         news_result = phase1["news"]
         market = phase1["market"]
         historical = phase1["historical"]
@@ -102,7 +115,9 @@ class Pipeline:
         )
 
         if not news_result.articles:
-            return self._empty_report(ticker, "No relevant news found for the lookback window.", historical)
+            return self._empty_report(
+                ticker, "No relevant news found for the lookback window.", historical
+            )
 
         article = news_result.primary_article
         analysis = news_result.primary_analysis
@@ -112,53 +127,62 @@ class Pipeline:
             )
 
         # ---------------------------------------------------------------
-        # Web research (only when warranted by the initial analysis)
+        # Web research (gated behind enable_web_research)
         # ---------------------------------------------------------------
-        if analysis.needs_web_research:
+        if self.settings.enable_web_research and analysis.needs_web_research:
             web = await self._research(ticker, article, analysis)
         else:
             web = WebResearch(performed=False)
 
         # ---------------------------------------------------------------
-        # PHASE 2 — sequential prediction (deterministic, no LLM)
+        # PHASE 2 — sequential prediction (deterministic, with tuning)
         # ---------------------------------------------------------------
+        t_phase2 = time.perf_counter()
         prediction_agent = PredictionAgent()
         with StageTimer("Phase 2 - prediction", log):
-            prediction = await prediction_agent.run(phase1)
+            prediction = await prediction_agent.run(phase1, tuning=tuning_i)
+        phase2_ms = (time.perf_counter() - t_phase2) * 1000
 
         # ---------------------------------------------------------------
         # PHASE 3 — sequential risk (options chain + deterministic sizing)
         # ---------------------------------------------------------------
-        risk_agent = RiskAgent(self.settings)
+        t_phase3 = time.perf_counter()
+        risk_agent = RiskAgent(settings_i)
         with StageTimer("Phase 3 - risk", log):
-            risk = await risk_agent.run(phase1, prediction)
+            risk = await risk_agent.run(phase1, prediction, tuning=tuning_i)
+        phase3_ms = (time.perf_counter() - t_phase3) * 1000
 
         # ---------------------------------------------------------------
-        # PHASE 4 — sequential decision (deterministic, no LLM)
+        # PHASE 4 — sequential decision (deterministic, with tuning)
         # ---------------------------------------------------------------
-        decision_agent = DecisionAgent(self.settings)
+        t_phase4 = time.perf_counter()
+        decision_agent = DecisionAgent(settings_i)
         with StageTimer("Phase 4 - decision", log):
-            decision = await decision_agent.run(phase1, prediction, risk)
+            decision = await decision_agent.run(
+                phase1, prediction, risk, tuning=tuning_i
+            )
+        phase4_ms = (time.perf_counter() - t_phase4) * 1000
 
         # ---------------------------------------------------------------
-        # Final LLM synthesis (interprets the deterministic phases)
+        # Final LLM synthesis (gated behind enable_llm_synthesis)
         # ---------------------------------------------------------------
         synthesis: FinalSynthesis | None = None
-        with StageTimer("Final analysis complete", log):
-            try:
-                synthesis = await self._synthesize(
-                    ticker,
-                    article,
-                    analysis,
-                    web,
-                    market,
-                    historical,
-                    prediction,
-                    risk,
-                    decision,
-                )
-            except OllamaError as exc:
-                log.warning("Final synthesis failed: %s", exc)
+        if self.settings.enable_llm_synthesis:
+            with StageTimer("Final analysis complete", log):
+                try:
+                    synthesis = await self._synthesize(
+                        ticker,
+                        article,
+                        analysis,
+                        web,
+                        market,
+                        historical,
+                        prediction,
+                        risk,
+                        decision,
+                    )
+                except OllamaError as exc:
+                    log.warning("Final synthesis failed: %s", exc)
 
         report = self._build_report(
             ticker,
@@ -172,6 +196,18 @@ class Pipeline:
             risk,
             decision,
         )
+
+        total_ms = (time.perf_counter() - t_start) * 1000
+        report.benchmark = {
+            "phase1_ms": round(phase1_ms, 1),
+            "phase2_ms": round(phase2_ms, 1),
+            "phase3_ms": round(phase3_ms, 1),
+            "phase4_ms": round(phase4_ms, 1),
+            "total_ms": round(total_ms, 1),
+            "industry": resolve_industry(ticker),
+            "weights_db_active": bool(self._db),
+        }
+
         self.clock.mark("Done")
         return report
 
