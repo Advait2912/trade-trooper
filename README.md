@@ -1,4 +1,4 @@
-# trade_trooper
+﻿# trade_trooper
 
 An agentic trading-intelligence pipeline built on **Alpaca's data APIs**
 (simulated/paper trading environment). Agents collect data in parallel, then
@@ -190,7 +190,7 @@ room — places an order:
 
 Order IDs are deterministic per cycle (`client_order_id`), so a restart can
 never double-fire an order. Everything is journaled to a SQLite database
-(`trading_journal.db` by default, `--journal` to override).
+(`data/trading_journal.db` by default, `--journal` to override).
 
 ### Backtest
 
@@ -223,13 +223,35 @@ python scripts/tune.py sweep --preset equity_only \
 
 # learn weights with Optuna (TPE) against a PF/win-rate/expectancy loss
 python scripts/tune.py optimize --universe NVDA,AMD,SPY --n-trials 100 \
-    --validate-universe TSLA,TLT --news-cache news_cache.db
+    --validate-universe TSLA,TLT --news-cache data/news_cache.db
+
+# per-industry weights: tune each industry's tickers and store the best config
+python scripts/tune.py optimize-industries --weights-db data/weights_db.json \
+    --industries Technology,Financials --n-trials 50 --news-cache data/news_cache.db
+
+# per-stock weights: tune one ticker at a time (overrides its industry config)
+python scripts/tune.py optimize-stocks --weights-db data/weights_db.json \
+    --tickers NVDA --n-trials 50 --min-trades 5 --news-cache data/news_cache.db
+
+# evaluate a mixed universe where every ticker uses its industry's weights
+python scripts/tune.py evaluate --weights-db data/weights_db.json \
+    --universe NVDA,AAPL,JPM,XOM --news-cache data/news_cache.db
 ```
 
 Keys may be any `TuningConfig` field (`momentum_weights`, `signal_weights`,
 `factor_weights`, `news_weight`, ...) or any `Settings` field (gates/sizing).
 `--preset` applies a named override (`default`, `equity_only`, `conservative`,
 `aggressive`, `signal_prediction_led`, `signal_technical_led`).
+
+**Per-industry weights** (see `tuning.md` for the full guide): a single global
+config doesn't transfer well across sectors, so `data/weights_db.json` holds one
+tuned config per industry. Each ticker maps to an industry via
+`weights_db.INDUSTRY_STOCKS`; `evaluate --weights-db` resolves every ticker to
+its own industry config (`--preset`/`--set` are the global base layer, then the
+`default` entry, then the industry entry, then any stock-specific entry under
+the reserved `"tickers"` namespace — ticker wins). `optimize-industries` runs
+the Optuna search once per industry and writes each best config back into the
+DB; `optimize-stocks` does the same per individual ticker.
 
 The backtest prices options with Black-Scholes (Phase 3 estimated IV, constant
 over the holding period) so option P&L reflects premium/delta/gamma/theta
@@ -244,7 +266,9 @@ historical sentiment cache (FinBERT on GPU; requires `requirements-ml.txt`):
 python scripts/build_news_cache.py NVDA,AMD,SPY --start 2025-01-01 --end 2026-01-01
 ```
 
-Then pass `--news-cache news_cache.db` to `evaluate`/`sweep`/`optimize`. Each
+The cache lands in `data/news_cache.db` (the default) and is picked up
+**automatically** by `evaluate`/`sweep`/`optimize` (override with
+`--news-cache <path>`). Each
 article is scored once with FinBERT (`P(pos) − P(neg)`), aggregated per trading
 day with a 24-hour lookback ending at the close (no look-ahead), and fed into
 the Phase 2 news adjustment and the Phase 4 news-sentiment vote.

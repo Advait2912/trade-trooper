@@ -8,6 +8,10 @@ Everything is driven from the command line — no JSON files required:
     # evaluate a single config with inline overrides and/or a preset
     python scripts/tune.py evaluate --preset equity_only --set min_confidence=0.45
 
+    # evaluate with per-industry weights (each ticker uses its industry's config)
+    python scripts/tune.py evaluate --weights-db data/weights_db.json \
+        --universe NVDA,AAPL,JPM --news-cache data/news_cache.db
+
     # sweep knobs: a single value fixes it, comma-separated values sweep it
     python scripts/tune.py sweep --universe NVDA,AMD,SPY --preset equity_only \
         --set min_confidence=0.35,0.5 --set min_risk_reward=1.0,1.5
@@ -18,6 +22,14 @@ list.  ``--preset NAME`` applies a named override from ``tuning.PRESETS``
 ``signal_prediction_led``, ``signal_technical_led``).  Keys may be
 ``TuningConfig`` fields (weights/thresholds) or ``Settings`` fields
 (gates/sizing).  Values are auto-coerced (bool / int / float / str).
+
+Per-industry weights are stored in a JSON DB (``data/weights_db.json``).  The
+``evaluate`` ``--weights-db`` flag resolves each ticker's industry config via
+``weights_db.resolve_overrides`` (``--preset``/``--set`` are the global base
+layer, then ``default``, then the industry entry, then any stock-specific entry
+under ``weights_db.TICKER_NAMESPACE``).  ``optimize-industries`` runs the Optuna
+search per industry and writes each industry's best config back into the DB;
+``optimize-stocks`` does the same per individual ticker.
 
 A JSON file is still available for dict-valued sweeps you can't express as a
 flag: ``--config overrides.json`` (evaluate) or ``--grid grid.json`` (sweep).
@@ -34,7 +46,7 @@ import json
 import math
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -45,6 +57,15 @@ from trading.journal import TradeJournal
 from trading.news_cache import NewsCache
 from tuning import PRESETS, TuningConfig
 from utils.config import Settings, load_settings
+from utils.paths import data_path
+from weights_db import (
+    INDUSTRY_STOCKS,
+    TICKER_NAMESPACE,
+    load_weights_db,
+    resolve_industry,
+    resolve_overrides,
+    save_weights_db,
+)
 
 DEFAULT_UNIVERSE = ["NVDA", "AMD", "TSLA", "AAPL", "MSFT", "SPY", "QQQ", "KO", "TLT", "XOM"]
 
@@ -85,17 +106,22 @@ def aggregate_stats(trades: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def _run_config(
-    settings: Settings,
+    config_for: Callable[[str], tuple[Settings, TuningConfig]],
     universe: list[str],
     months: int,
-    tuning: TuningConfig,
     bars_cache: dict[str, list[Any]],
     news_cache: NewsCache | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Run one config over the universe; return pooled trades + per-ticker stats."""
+    """Run one config per ticker over the universe; return pooled + per-ticker stats.
+
+    ``config_for(ticker)`` returns the (Settings, TuningConfig) for that ticker,
+    so a weights DB can hand each ticker its industry's config while a plain
+    evaluate/sweep passes a uniform pair.
+    """
     all_trades: list[dict[str, Any]] = []
     per_ticker: dict[str, dict[str, Any]] = {}
     for ticker in universe:
+        settings, tuning = config_for(ticker)
         journal = TradeJournal(":memory:")
         await run_backtest(
             settings, ticker, months=months, journal=journal, tuning=tuning,
@@ -106,6 +132,14 @@ async def _run_config(
         per_ticker[ticker] = aggregate_stats(trades)
         all_trades.extend(trades)
     return all_trades, per_ticker
+
+
+def _build_config(base_overrides: dict[str, Any]) -> tuple[Settings, TuningConfig]:
+    """Build a fresh (Settings, TuningConfig) from (possibly partial) overrides."""
+    settings = load_settings()
+    tuning = TuningConfig()
+    _apply_overrides(settings, tuning, base_overrides)
+    return settings, tuning
 
 
 def _apply_overrides(settings: Settings, tuning: TuningConfig, overrides: dict[str, Any]) -> None:
@@ -161,17 +195,35 @@ def _preset_overrides(names: list[str]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Fetch
 # ---------------------------------------------------------------------------
-async def _fetch_bars_for(settings: Settings, ticker: str, months: int) -> list[Any]:
+async def _fetch_bars_for(
+    settings: Settings, ticker: str, months: int, end_date: str | None = None
+) -> list[Any]:
     days_back = _WARMUP + int(_DAY * max(1, months) / 12.0)
     async with AlpacaClient(settings) as client:
         return await get_price_history(
-            client, ticker, days_back=days_back, interval="1d", feed=settings.alpaca_data_feed
+            client, ticker, days_back=days_back, interval="1d",
+            feed=settings.alpaca_data_feed, end_date=_parse_end_date(end_date),
         )
 
 
-async def _fetch_all(settings: Settings, universe: list[str], months: int) -> dict[str, list[Any]]:
+def _parse_end_date(end_date: str | None) -> Any:
+    """Parse --end-date YYYY-MM-DD into a date (None when omitted)."""
+    if not end_date:
+        return None
+    from datetime import date as _date
+
+    return _date.fromisoformat(end_date)
+
+
+async def _fetch_all(
+    settings: Settings,
+    universe: list[str],
+    months: int,
+    end_date: str | None = None,
+) -> dict[str, list[Any]]:
     results = await asyncio.gather(
-        *(_fetch_bars_for(settings, t, months) for t in universe), return_exceptions=True
+        *(_fetch_bars_for(settings, t, months, end_date) for t in universe),
+        return_exceptions=True,
     )
     cache: dict[str, list[Any]] = {}
     for ticker, res in zip(universe, results):
@@ -206,37 +258,51 @@ def _universe(args: argparse.Namespace) -> list[str]:
 
 
 def _open_news_cache(args: argparse.Namespace) -> NewsCache | None:
-    return NewsCache(args.news_cache) if args.news_cache else None
+    """Open the news cache, or None when absent (news-neutral backtest)."""
+    if not args.news_cache:
+        return None
+    path = Path(args.news_cache)
+    if not path.exists():
+        print(f"  ! news cache {path} not found; running news-neutral", file=sys.stderr)
+        return None
+    return NewsCache(path)
 
 
 async def _evaluate(args: argparse.Namespace) -> int:
-    settings = load_settings()
-    overrides = _preset_overrides(args.preset)
+    universe = _universe(args)
+    base = _preset_overrides(args.preset)
     for item in args.set:
         key, values = _parse_set_item(item)
         if len(values) != 1:
             print(f"Error: evaluate --set takes a single value (got {item!r}).", file=sys.stderr)
             return 2
-        overrides[key] = values[0]
+        base[key] = values[0]
     if args.config:
-        overrides.update(json.loads(Path(args.config).read_text()))
+        base.update(json.loads(Path(args.config).read_text()))
 
-    tuning = TuningConfig()
-    _apply_overrides(settings, tuning, overrides)
+    db = load_weights_db(args.weights_db) if args.weights_db else None
+
+    def config_for(ticker: str) -> tuple[Settings, TuningConfig]:
+        overrides = resolve_overrides(ticker, db, base) if db is not None else dict(base)
+        return _build_config(overrides)
 
     news_cache = _open_news_cache(args)
     try:
-        bars = await _fetch_all(settings, _universe(args), args.months)
-        trades, per_ticker = await _run_config(
-            settings, _universe(args), args.months, tuning, bars, news_cache
-        )
+        bars = await _fetch_all(load_settings(), universe, args.months, args.end_date)
+        trades, per_ticker = await _run_config(config_for, universe, args.months, bars, news_cache)
     finally:
         if news_cache:
             news_cache.close()
 
-    print(f"\n== evaluate ({len(_universe(args))} tickers, {args.months} months) ==")
+    print(f"\n== evaluate ({len(universe)} tickers, {args.months} months) ==")
     for ticker, agg in per_ticker.items():
-        _print_aggregate(f"  {ticker}", agg)
+        if db is not None:
+            stock = (db.get(TICKER_NAMESPACE) or {}).get(ticker)
+            star = "*" if stock else ""
+            label = f"  {ticker} [{resolve_industry(ticker)}{star}]"
+        else:
+            label = f"  {ticker}"
+        _print_aggregate(label, agg)
     print("-" * 112)
     _print_aggregate("AGGREGATE", aggregate_stats(trades), cap=args.max_dd_cap)
     return 0
@@ -262,7 +328,7 @@ async def _sweep(args: argparse.Namespace) -> int:
 
     base_settings = load_settings()
     news_cache = _open_news_cache(args)
-    bars = await _fetch_all(base_settings, universe, args.months)
+    bars = await _fetch_all(base_settings, universe, args.months, args.end_date)
 
     keys = list(axes)
     combos = list(itertools.product(*(axes[k] for k in keys)))
@@ -278,7 +344,9 @@ async def _sweep(args: argparse.Namespace) -> int:
             tuning = TuningConfig()
             _apply_overrides(settings, tuning, overrides)
 
-            trades, _ = await _run_config(settings, universe, args.months, tuning, bars, news_cache)
+            trades, _ = await _run_config(
+                lambda ticker: (settings, tuning), universe, args.months, bars, news_cache
+            )
             agg = aggregate_stats(trades)
             rows.append((json.dumps(overrides, sort_keys=True), agg))
             _print_aggregate(f"[{idx}/{len(combos)}] {json.dumps(overrides, sort_keys=True)}", agg, cap=args.max_dd_cap)
@@ -353,63 +421,83 @@ def _render_progress(done: int, total: int, msg: str) -> None:
         sys.stderr.write(f"[{done}/{total}] {msg}\n")
 
 
-async def _optimize(args: argparse.Namespace) -> int:
+async def _optimize_universe(
+    train: list[str],
+    months: int,
+    n_trials: int,
+    bars: dict[str, list[Any]],
+    news_cache: NewsCache | None,
+    min_trades: int,
+    dd_cap: float,
+) -> tuple[dict[str, Any], float] | None:
+    """Run Optuna TPE over ``train``; return (best overrides, best score)."""
     try:
         import optuna  # noqa: PLC0415 - optional dependency
     except ImportError:
-        print("optuna is required for `optimize`. Run `pip install optuna`.", file=sys.stderr)
-        return 2
-
-    train = _universe(args)
-    validate = [t.strip().upper() for t in (args.validate_universe or "").split(",") if t.strip()]
-
-    train_bars = await _fetch_all(load_settings(), train, args.months)
-    news_cache = _open_news_cache(args)
+        print("optuna is required for tuning. Run `pip install optuna`.", file=sys.stderr)
+        return None
 
     sampler = optuna.samplers.TPESampler(seed=0)
     study = optuna.create_study(direction="maximize", sampler=sampler)
 
-    print(f"\n== optimize: {args.n_trials} trials x {len(train)} tickers x {args.months} months ==")
-    try:
-        for n in range(args.n_trials):
-            trial = study.ask()
-            overrides = _sample_trial(trial)
-            trial.set_user_attr("config", json.dumps(overrides, sort_keys=True))
-            settings = load_settings()
-            tuning = TuningConfig()
-            _apply_overrides(settings, tuning, overrides)
+    for n in range(n_trials):
+        trial = study.ask()
+        overrides = _sample_trial(trial)
+        trial.set_user_attr("config", json.dumps(overrides, sort_keys=True))
+        settings = load_settings()
+        tuning = TuningConfig()
+        _apply_overrides(settings, tuning, overrides)
 
-            trades, _ = await _run_config(settings, train, args.months, tuning, train_bars, news_cache)
-            agg = aggregate_stats(trades)
-            score = _objective_score(agg, args.min_trades, args.max_dd_cap)
-            study.tell(trial, score)
-            _render_progress(
-                n + 1,
-                args.n_trials,
-                f"score={score:.3f} PF={agg['profit_factor']:.2f} "
-                f"win={agg['win_rate'] * 100:.1f}% exp=${agg['expectancy']:.2f} "
-                f"trades={agg['trades']}",
-            )
-    finally:
-        if news_cache:
-            news_cache.close()
+        trades, _ = await _run_config(
+            lambda ticker: (settings, tuning), train, months, bars, news_cache
+        )
+        agg = aggregate_stats(trades)
+        score = _objective_score(agg, min_trades, dd_cap)
+        study.tell(trial, score)
+        _render_progress(
+            n + 1,
+            n_trials,
+            f"score={score:.3f} PF={agg['profit_factor']:.2f} "
+            f"win={agg['win_rate'] * 100:.1f}% exp=${agg['expectancy']:.2f} "
+            f"trades={agg['trades']}",
+        )
     if sys.stderr.isatty():
         sys.stderr.write("\n")
 
     best = study.best_trial
     best_overrides = json.loads(best.user_attrs["config"])
-    print(f"\n== best config (train score={best.value:.3f}) ==")
+    return best_overrides, best.value
+
+
+async def _optimize(args: argparse.Namespace) -> int:
+    train = _universe(args)
+    validate = [t.strip().upper() for t in (args.validate_universe or "").split(",") if t.strip()]
+
+    train_bars = await _fetch_all(load_settings(), train, args.months, args.end_date)
+    news_cache = _open_news_cache(args)
+    try:
+        print(f"\n== optimize: {args.n_trials} trials x {len(train)} tickers x {args.months} months ==")
+        result = await _optimize_universe(
+            train, args.months, args.n_trials, train_bars, news_cache,
+            args.min_trades, args.max_dd_cap,
+        )
+    finally:
+        if news_cache:
+            news_cache.close()
+    if result is None:
+        return 2
+    best_overrides, best_value = result
+
+    print(f"\n== best config (train score={best_value:.3f}) ==")
     print(json.dumps(best_overrides, indent=2, sort_keys=True))
 
     if validate:
         vcache = _open_news_cache(args)
         try:
-            val_bars = await _fetch_all(load_settings(), validate, args.months)
-            settings = load_settings()
-            tuning = TuningConfig()
-            _apply_overrides(settings, tuning, best_overrides)
+            val_bars = await _fetch_all(load_settings(), validate, args.months, args.end_date)
+            settings, tuning = _build_config(best_overrides)
             trades, per_ticker = await _run_config(
-                settings, validate, args.months, tuning, val_bars, vcache
+                lambda ticker: (settings, tuning), validate, args.months, val_bars, vcache
             )
         finally:
             if vcache:
@@ -418,6 +506,78 @@ async def _optimize(args: argparse.Namespace) -> int:
         for ticker, agg in per_ticker.items():
             _print_aggregate(f"  {ticker}", agg)
         _print_aggregate("VALIDATION AGGREGATE", aggregate_stats(trades), cap=args.max_dd_cap)
+    return 0
+
+
+async def _optimize_industries(args: argparse.Namespace) -> int:
+    db_path = Path(args.weights_db)
+    db = load_weights_db(db_path)
+
+    industries = [name.strip() for name in args.industries.split(",") if name.strip()]
+    if len(industries) == 1 and industries[0].lower() == "all":
+        industries = list(INDUSTRY_STOCKS)
+    for name in industries:
+        if name not in INDUSTRY_STOCKS:
+            print(f"Unknown industry {name!r}; available: {sorted(INDUSTRY_STOCKS)}", file=sys.stderr)
+            return 2
+
+    news_cache = _open_news_cache(args)
+    try:
+        for industry in industries:
+            tickers = INDUSTRY_STOCKS[industry]
+            print(f"\n== optimize-industries: {industry} ({len(tickers)} tickers, {args.months} months) ==")
+            bars = await _fetch_all(load_settings(), tickers, args.months, args.end_date)
+            available = [t for t in tickers if t in bars]
+            if not available:
+                print(f"  ! no bars fetched for {industry}; skipping", file=sys.stderr)
+                continue
+            result = await _optimize_universe(
+                available, args.months, args.n_trials, bars, news_cache,
+                args.min_trades, args.max_dd_cap,
+            )
+            if result is None:
+                return 2
+            best_overrides, best_value = result
+            db[industry] = best_overrides
+            save_weights_db(db_path, db)
+            print(f"\n== {industry} best config (train score={best_value:.3f}) ==")
+            print(json.dumps(best_overrides, indent=2, sort_keys=True))
+            print(f"  -> saved to {db_path}")
+    finally:
+        if news_cache:
+            news_cache.close()
+    return 0
+
+
+async def _optimize_stocks(args: argparse.Namespace) -> int:
+    db_path = Path(args.weights_db)
+    db = load_weights_db(db_path)
+    tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+
+    ticker_db = db.setdefault(TICKER_NAMESPACE, {})
+    news_cache = _open_news_cache(args)
+    try:
+        for ticker in tickers:
+            print(f"\n== optimize-stocks: {ticker} ({args.months} months) ==")
+            bars = await _fetch_all(load_settings(), [ticker], args.months, args.end_date)
+            if ticker not in bars:
+                print(f"  ! no bars fetched for {ticker}; skipping", file=sys.stderr)
+                continue
+            result = await _optimize_universe(
+                [ticker], args.months, args.n_trials, bars, news_cache,
+                args.min_trades, args.max_dd_cap,
+            )
+            if result is None:
+                return 2
+            best_overrides, best_value = result
+            ticker_db[ticker] = best_overrides
+            save_weights_db(db_path, db)
+            print(f"\n== {ticker} best config (train score={best_value:.3f}) ==")
+            print(json.dumps(best_overrides, indent=2, sort_keys=True))
+            print(f"  -> saved to {db_path} [{TICKER_NAMESPACE}.{ticker}]")
+    finally:
+        if news_cache:
+            news_cache.close()
     return 0
 
 
@@ -431,11 +591,14 @@ def build_parser() -> argparse.ArgumentParser:
         months=dict(type=int, default=12, help="lookback months per ticker"),
         max_dd_cap=dict(type=float, default=0.15,
                         help="fraction of starting equity treated as max-drawdown cap"),
+        end_date=dict(default=None,
+                      help="window end date YYYY-MM-DD (default: today) — for historical train/test"),
     )
     presets = dict(preset=dict(action="append", default=[], help="named preset override (repeatable)"),
                    set=dict(action="append", default=[], dest="set",
                             help="key=value (fix) or key=v1,v2 (sweep axis); repeatable"))
-    cache = dict(news_cache=dict(default=None, help="path to a built news-sentiment cache (optional)"))
+    cache = dict(news_cache=dict(default=str(data_path("news_cache.db")),
+                                 help="path to a built news-sentiment cache (default data/news_cache.db)"))
 
     for name in ("evaluate", "sweep"):
         p = sub.add_parser(name)
@@ -448,6 +611,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = next(sp for sp in sub.choices.values() if sp.prog.endswith("evaluate"))
     p.add_argument("--config", default=None, help="JSON file of overrides (optional)")
+    p.add_argument("--weights-db", default=str(data_path("weights_db.json")),
+                   help="path to per-industry weights JSON (default data/weights_db.json); "
+                        "resolves each ticker's industry/stock config")
 
     p = next(sp for sp in sub.choices.values() if sp.prog.endswith("sweep"))
     p.add_argument("--grid", default=None, help="JSON file mapping knob -> list of values (optional)")
@@ -462,6 +628,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--validate-universe", default=None,
                    help="held-out tickers to validate the best config on (comma-separated)")
 
+    p = sub.add_parser("optimize-industries")
+    p.add_argument("--industries", default="all",
+                   help="comma-separated industry names from weights_db.INDUSTRY_STOCKS, or 'all'")
+    p.add_argument("--weights-db", default=str(data_path("weights_db.json")),
+                   help="path to weights_db.json to read/write (default data/weights_db.json)")
+    p.add_argument("--months", type=int, default=12, help="lookback months per ticker")
+    p.add_argument("--max-dd-cap", type=float, default=0.15,
+                   help="fraction of starting equity treated as max-drawdown cap")
+    p.add_argument("--end-date", default=None,
+                   help="window end date YYYY-MM-DD (default: today) — for historical train/test")
+    p.add_argument("--news-cache", default=str(data_path("news_cache.db")),
+                   help="path to a built news-sentiment cache (default data/news_cache.db)")
+    p.add_argument("--n-trials", type=int, default=100, help="number of Optuna trials per industry")
+    p.add_argument("--min-trades", type=int, default=30, help="min trades before the loss penalizes")
+
+    p = sub.add_parser("optimize-stocks")
+    p.add_argument("--tickers", required=True,
+                   help="comma-separated tickers to tune individually (each written to the DB)")
+    p.add_argument("--weights-db", default=str(data_path("weights_db.json")),
+                   help="path to weights_db.json to read/write (default data/weights_db.json)")
+    p.add_argument("--months", type=int, default=12, help="lookback months per ticker")
+    p.add_argument("--max-dd-cap", type=float, default=0.15,
+                   help="fraction of starting equity treated as max-drawdown cap")
+    p.add_argument("--end-date", default=None,
+                   help="window end date YYYY-MM-DD (default: today) — for historical train/test")
+    p.add_argument("--news-cache", default=str(data_path("news_cache.db")),
+                   help="path to a built news-sentiment cache (default data/news_cache.db)")
+    p.add_argument("--n-trials", type=int, default=100, help="number of Optuna trials per ticker")
+    p.add_argument("--min-trades", type=int, default=5,
+                   help="min trades before the loss penalizes (single tickers trade less)")
+
     return parser
 
 
@@ -473,6 +670,10 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_sweep(args))
     if args.command == "optimize":
         return asyncio.run(_optimize(args))
+    if args.command == "optimize-industries":
+        return asyncio.run(_optimize_industries(args))
+    if args.command == "optimize-stocks":
+        return asyncio.run(_optimize_stocks(args))
     return 2
 
 
