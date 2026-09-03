@@ -23,25 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Indicator weights (must sum to 1.0)
-# ---------------------------------------------------------------------------
-_WEIGHTS: dict[str, float] = {
-    "macd": 0.25,
-    "adx": 0.20,
-    "rsi": 0.20,
-    "bollinger": 0.15,
-    "obv": 0.10,
-    "stochastic": 0.10,
-}
-
-_ADX_STRENGTH_SCALE: dict[str, float] = {
-    "no_trend": 0.0,
-    "weak": 0.3,
-    "moderate": 0.7,
-    "strong": 1.0,
-    "very_strong": 1.0,
-}
+from tuning import DEFAULT_TUNING, TuningConfig
 
 
 def _score_rsi(rsi_dict: dict[str, Any]) -> float:
@@ -82,15 +64,19 @@ def _score_macd(macd_dict: dict[str, Any]) -> float:
     return 0.0
 
 
-def _score_adx(adx_dict: dict[str, Any]) -> tuple[float, float]:
+def _score_adx(
+    adx_dict: dict[str, Any],
+    adx_scale_map: dict[str, float] | None = None,
+) -> tuple[float, float]:
     """ADX: direction score scaled by trend strength.
 
     Returns (raw_direction_score, strength_scale) so the caller can
     discount the weight for weak-trend environments.
     """
+    scale_map = adx_scale_map or DEFAULT_TUNING.adx_strength_scale
     direction = adx_dict.get("trend_direction", "ranging")
     strength = adx_dict.get("trend_strength", "no_trend")
-    scale = _ADX_STRENGTH_SCALE.get(strength, 0.0)
+    scale = scale_map.get(strength, 0.0)
     if direction == "uptrend":
         return 1.0, scale
     if direction == "downtrend":
@@ -163,6 +149,7 @@ def _score_stochastic(stoch_dict: dict[str, Any]) -> float:
 
 def calculate_technical_indicators(
     technical: dict[str, Any],
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Combine pre-computed Phase 1 indicator results into a momentum score.
 
@@ -171,6 +158,8 @@ def calculate_technical_indicators(
     technical:
         The ``HistoricalAgentResult.technical`` dict already computed in
         Phase 1 — contains nested dicts keyed by tool name.
+    tuning:
+        Optional ``TuningConfig`` overriding the default indicator weights.
 
     Returns
     -------
@@ -184,6 +173,8 @@ def calculate_technical_indicators(
         bollinger_regime  : str
         obv_confirmation  : str
     """
+    t = tuning or DEFAULT_TUNING
+    weights = t.momentum_weights
     rsi_dict = technical.get("calculate_rsi") or {}
     macd_dict = technical.get("calculate_macd") or {}
     adx_dict = technical.get("calculate_adx") or {}
@@ -193,20 +184,24 @@ def calculate_technical_indicators(
 
     rsi_score = _score_rsi(rsi_dict)
     macd_score = _score_macd(macd_dict)
-    adx_score, adx_scale = _score_adx(adx_dict)
+    adx_score, adx_scale = _score_adx(adx_dict, t.adx_strength_scale)
     bb_score = _score_bollinger(bb_dict)
     obv_score = _score_obv(obv_dict)
     stoch_score = _score_stochastic(stoch_dict)
 
     # Effective ADX weight = base_weight × strength_scale
-    effective_adx_weight = _WEIGHTS["adx"] * adx_scale
+    effective_adx_weight = weights["adx"] * adx_scale
     # Redistribute unused ADX weight proportionally to other indicators
-    dropped = _WEIGHTS["adx"] - effective_adx_weight
-    other_keys = [k for k in _WEIGHTS if k != "adx"]
-    other_total = sum(_WEIGHTS[k] for k in other_keys)
+    dropped = weights["adx"] - effective_adx_weight
+    other_keys = [k for k in weights if k != "adx"]
+    other_total = sum(weights[k] for k in other_keys)
     adjusted_weights: dict[str, float] = {}
-    for k in other_keys:
-        adjusted_weights[k] = _WEIGHTS[k] + dropped * (_WEIGHTS[k] / other_total)
+    if other_total > 0:
+        for k in other_keys:
+            adjusted_weights[k] = weights[k] + dropped * (weights[k] / other_total)
+    else:
+        for k in other_keys:
+            adjusted_weights[k] = weights[k]
     adjusted_weights["adx"] = effective_adx_weight
 
     scores = {
@@ -244,6 +239,7 @@ def apply_news_adjustment(
     momentum_score: float,
     news_sentiment: str,
     news_sentiment_score: float,
+    news_weight: float | None = None,
 ) -> tuple[float, float]:
     """Deterministically adjust momentum score for news sentiment.
 
@@ -271,15 +267,15 @@ def apply_news_adjustment(
     -------
     (news_adjustment, adjusted_momentum)
     """
-    NEWS_WEIGHT = 0.20
+    nw = news_weight if news_weight is not None else DEFAULT_TUNING.news_weight
 
     sign_map = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0, "uncertain": 0.0}
     sign = sign_map.get(news_sentiment, 0.0)
 
     # Use absolute value of sentiment_score; sign comes from the label.
-    raw_adj = sign * abs(news_sentiment_score) * NEWS_WEIGHT
+    raw_adj = sign * abs(news_sentiment_score) * nw
     # Clamp the adjustment itself to ±NEWS_WEIGHT
-    raw_adj = max(-NEWS_WEIGHT, min(NEWS_WEIGHT, raw_adj))
+    raw_adj = max(-nw, min(nw, raw_adj))
 
     adjusted = max(-1.0, min(1.0, momentum_score + raw_adj))
     return round(raw_adj, 4), round(adjusted, 4)

@@ -14,12 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_GAP_FREQUENCY_MULTIPLIER: dict[str, float] = {
-    "rare": 1.0,
-    "occasional": 1.1,
-    "frequent": 1.25,
-    "very_frequent": 1.5,
-}
+from tuning import DEFAULT_TUNING, TuningConfig
 
 
 def calculate_max_loss(
@@ -30,6 +25,7 @@ def calculate_max_loss(
     gap_frequency: str = "rare",
     var_pct: float = 0.0,
     cvar_pct: float = 0.0,
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Calculate maximum loss for a sized equity position.
 
@@ -52,7 +48,7 @@ def calculate_max_loss(
         }
 
     base_loss = max(0.0, entry - stop)
-    gap_mult = _GAP_FREQUENCY_MULTIPLIER.get(gap_frequency, 1.0)
+    gap_mult = (tuning or DEFAULT_TUNING).gap_frequency_multiplier.get(gap_frequency, 1.0)
     gap_slippage = entry * (avg_gap_size / 100.0) * gap_mult
     effective_loss = base_loss + gap_slippage
 

@@ -207,6 +207,29 @@ technical/prediction edge; the forward paper run adds the news effect.
 expectancy, average win/loss, max drawdown, decision distribution, a
 per-instrument breakdown and the latest equity snapshot.
 
+### Tuning harness
+
+Every numeric weight/threshold in Phases 2-4 lives in `tuning.py`
+(`TuningConfig`). `scripts/tune.py` sweeps them against the backtest so they
+can be fitted rather than hand-edited:
+
+```bash
+# baseline over a diversified universe (fetches bars once per ticker)
+python scripts/tune.py evaluate --universe NVDA,AMD,SPY --months 12
+
+# sweep a grid of knobs (JSON maps knob -> list of candidate values)
+python scripts/tune.py sweep --grid grid.json --months 12 --max-dd-cap 0.15
+```
+
+Keys in a grid may be any `TuningConfig` field (e.g. `momentum_weights`,
+`signal_weights`, `factor_weights`, `news_weight`, `min_confidence`) or any
+`Settings` field (gates/sizing). Output is a table of aggregated profit factor,
+expectancy, win rate and max drawdown, ranked by expectancy.
+
+The backtest prices options with Black-Scholes (Phase 3 estimated IV, constant
+over the holding period) so option P&L reflects premium/delta/gamma/theta
+rather than a raw `underlying × 100` proxy.
+
 ## Risk assessment and alternatives
 
 The agent is a long-only (-premium) volatility-and-momentum system. Honest

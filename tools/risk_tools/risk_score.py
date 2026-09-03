@@ -18,22 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# Sub-score (0..1) maps for the qualitative signals.  Lower is safer.
-_VOL_REGIME: dict[str, float] = {"low": 0.05, "normal": 0.35, "high": 0.65, "very_high": 0.95}
-_DRAWDOWN: dict[str, float] = {"low": 0.10, "moderate": 0.40, "high": 0.70, "extreme": 0.95}
-_GAP: dict[str, float] = {"rare": 0.10, "occasional": 0.30, "frequent": 0.60, "very_frequent": 0.85}
-
-# Relative importance of each factor (sums to 1.0 with the base).
-_FACTOR_WEIGHTS: dict[str, float] = {
-    "vol": 0.22,
-    "drawdown": 0.16,
-    "gap": 0.12,
-    "spread": 0.10,
-    "max_loss": 0.20,
-    "confidence": 0.12,
-}
-_BASE_WEIGHT = 0.08
-_MAX_LOSS_SPAN = 12.0  # % of entry mapped to 0..1 (2% -> 0, 14% -> 1)
+from tuning import DEFAULT_TUNING, TuningConfig
 
 
 def _clamp01(x: float) -> float:
@@ -57,6 +42,7 @@ def calculate_risk_score(
     spread_pct: float = 0.0,
     max_loss_pct: float = 0.0,
     confidence: float = 0.5,
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Aggregate risk signals into a 0–100 score and a risk level.
 
@@ -74,23 +60,24 @@ def calculate_risk_score(
 
     Returns dict with ``risk_score``, ``risk_level`` and the ``components``.
     """
-    vol_sub = _clamp01(0.6 * _VOL_REGIME.get(vol_regime, 0.35) + 0.4 * (iv_percentile / 100.0))
-    dd_sub = _DRAWDOWN.get(drawdown_risk, 0.10)
-    gap_sub = _GAP.get(gap_frequency, 0.10)
+    t = tuning or DEFAULT_TUNING
+    vol_sub = _clamp01(0.6 * t.vol_regime_subs.get(vol_regime, 0.35) + 0.4 * (iv_percentile / 100.0))
+    dd_sub = t.drawdown_subs.get(drawdown_risk, 0.10)
+    gap_sub = t.gap_subs.get(gap_frequency, 0.10)
     spread_sub = _clamp01(spread_pct / 0.15)
-    max_loss_sub = _clamp01((max_loss_pct * 100.0 - 2.0) / _MAX_LOSS_SPAN)
+    max_loss_sub = _clamp01((max_loss_pct * 100.0 - 2.0) / t.max_loss_span)
     conf_sub = _clamp01(1.0 - max(0.0, min(1.0, confidence)))
 
     weighted = (
-        _FACTOR_WEIGHTS["vol"] * vol_sub
-        + _FACTOR_WEIGHTS["drawdown"] * dd_sub
-        + _FACTOR_WEIGHTS["gap"] * gap_sub
-        + _FACTOR_WEIGHTS["spread"] * spread_sub
-        + _FACTOR_WEIGHTS["max_loss"] * max_loss_sub
-        + _FACTOR_WEIGHTS["confidence"] * conf_sub
+        t.factor_weights["vol"] * vol_sub
+        + t.factor_weights["drawdown"] * dd_sub
+        + t.factor_weights["gap"] * gap_sub
+        + t.factor_weights["spread"] * spread_sub
+        + t.factor_weights["max_loss"] * max_loss_sub
+        + t.factor_weights["confidence"] * conf_sub
     )
-    total_weight = sum(_FACTOR_WEIGHTS.values()) + _BASE_WEIGHT
-    score = 100.0 * (_BASE_WEIGHT + weighted) / total_weight
+    total_weight = sum(t.factor_weights.values()) + t.base_weight
+    score = 100.0 * (t.base_weight + weighted) / total_weight
     score = max(0.0, min(100.0, score))
 
     if score < 25:
@@ -106,7 +93,7 @@ def calculate_risk_score(
         "risk_score": round(score, 1),
         "risk_level": level,
         "components": {
-            "base": round(_BASE_WEIGHT * 100.0 / total_weight, 2),
+            "base": round(t.base_weight * 100.0 / total_weight, 2),
             "vol": round(vol_sub, 4),
             "drawdown": round(dd_sub, 4),
             "gap": round(gap_sub, 4),

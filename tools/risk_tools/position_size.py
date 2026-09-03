@@ -18,12 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_DRAWDOWN_FACTOR: dict[str, float] = {
-    "low": 1.0,
-    "moderate": 0.8,
-    "high": 0.6,
-    "extreme": 0.4,
-}
+from tuning import DEFAULT_TUNING, TuningConfig
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -42,6 +37,7 @@ def calculate_position_size(
     spread_pct: float = 0.0,
     drawdown_risk: str = "low",
     max_position_pct: float = 0.05,
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Compute equity and option position sizes.
 
@@ -52,6 +48,7 @@ def calculate_position_size(
     quality factors for auditability.
     """
     errors: list[str] = []
+    t = tuning or DEFAULT_TUNING
 
     if capital <= 0:
         return {
@@ -78,10 +75,10 @@ def calculate_position_size(
 
     risk_amount = capital * risk_per_trade_pct
 
-    confidence_factor = _clamp(confidence, 0.25, 1.0)
-    iv_quality_factor = _clamp(iv_quality, 0.5, 1.0)
-    spread_factor = _clamp(1.0 - spread_pct * 6.0, 0.3, 1.0)
-    drawdown_factor = _DRAWDOWN_FACTOR.get(drawdown_risk, 1.0)
+    confidence_factor = _clamp(confidence, t.conf_floor, 1.0)
+    iv_quality_factor = _clamp(iv_quality, t.iv_quality_floor, 1.0)
+    spread_factor = _clamp(1.0 - spread_pct * t.spread_factor_slope, t.spread_factor_floor, 1.0)
+    drawdown_factor = t.drawdown_factor.get(drawdown_risk, 1.0)
     total_factor = confidence_factor * iv_quality_factor * spread_factor * drawdown_factor
 
     if stop_distance > 0:

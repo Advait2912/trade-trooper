@@ -33,12 +33,9 @@ import math
 from typing import Any
 
 from schemas.market import MarketData
+from tuning import DEFAULT_TUNING, TuningConfig
 
 _HORIZON_DEFAULT = 5   # trading days (one calendar week)
-_DIRECTION_DAMPEN = 0.50
-_CONF_BASE = 0.50
-_CONF_MIN = 0.10
-_CONF_MAX = 0.90
 
 
 def estimate_price_move(
@@ -48,6 +45,7 @@ def estimate_price_move(
     vol_regime: str,
     mean_reversion_score: float,
     horizon_days: int = _HORIZON_DEFAULT,
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Estimate the expected price move over ``horizon_days`` trading days.
 
@@ -78,6 +76,7 @@ def estimate_price_move(
         status              : "ok" | "insufficient_data"
     """
     errors: list[str] = []
+    t = tuning or DEFAULT_TUNING
 
     price = market.price
     if price <= 0.0 or not math.isfinite(price):
@@ -102,30 +101,30 @@ def estimate_price_move(
     horizon_days = max(1, horizon_days)
     expected_move = atr_pct * math.sqrt(horizon_days)
 
-    direction_bias = adjusted_momentum * expected_move * _DIRECTION_DAMPEN
+    direction_bias = adjusted_momentum * expected_move * t.direction_dampen
     price_forecast = price * (1.0 + direction_bias)
     forecast_low = price * (1.0 - expected_move)
     forecast_high = price * (1.0 + expected_move)
 
     # ---- Confidence ----
-    conf = _CONF_BASE
+    conf = t.conf_base
 
     if adx_trend_strength in {"strong", "very_strong"}:
-        conf += 0.15
+        conf += t.conf_adx_bonus
     if vol_regime == "normal":
-        conf += 0.10
+        conf += t.conf_normal_vol_bonus
     if abs(adjusted_momentum) > 0.40:
-        conf += 0.10
+        conf += t.conf_momentum_bonus
     if vol_regime in {"high", "very_high"}:
-        conf -= 0.10
+        conf -= t.conf_high_vol_penalty
     # Mean-reversion contradicts momentum direction
     if (mean_reversion_score > 0.05 and adjusted_momentum > 0.10) or \
        (mean_reversion_score > 0.05 and adjusted_momentum < -0.10):
         # High reversion score means price is trending toward the mean —
         # if momentum says up but reversion is high, confidence drops.
-        conf -= 0.15
+        conf -= t.conf_reversion_penalty
 
-    confidence = max(_CONF_MIN, min(_CONF_MAX, conf))
+    confidence = max(t.conf_min, min(t.conf_max, conf))
 
     return {
         "price_forecast": round(price_forecast, 4),

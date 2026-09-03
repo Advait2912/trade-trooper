@@ -64,7 +64,9 @@ from tools.historical.volatility import (
 from tools.prediction_tools.price_move import estimate_price_move
 from tools.prediction_tools.technical import calculate_technical_indicators
 from tools.prediction_tools.volatility_forecast import forecast_volatility
+from tools.risk_tools.greeks import black_scholes_price
 from trading.journal import TradeJournal
+from tuning import TuningConfig
 from utils.config import Settings
 
 log = logging.getLogger("market_intel_agent.backtest")
@@ -73,13 +75,14 @@ _WARMUP = 260
 _SLIPPAGE = 0.0005
 _DAY = 252
 _START_EQUITY = 100_000.0
+_RFR = 0.045
 
 
-def _predict(bundle: Phase1Bundle) -> PredictionResult:
+def _predict(bundle: Phase1Bundle, tuning: TuningConfig | None = None) -> PredictionResult:
     """News-neutral Phase 2 replica (no LLM)."""
-    tech = calculate_technical_indicators(bundle.historical.technical or {})
+    tech = calculate_technical_indicators(bundle.historical.technical or {}, tuning=tuning)
     vol = forecast_volatility(
-        bundle.historical.volatility or {}, bundle.historical.historical_trends or {}
+        bundle.historical.volatility or {}, bundle.historical.historical_trends or {}, tuning=tuning
     )
     move = estimate_price_move(
         market=bundle.market,
@@ -87,6 +90,7 @@ def _predict(bundle: Phase1Bundle) -> PredictionResult:
         adx_trend_strength=tech["adx_trend_strength"],
         vol_regime=vol["vol_regime"],
         mean_reversion_score=vol["mean_reversion_score"],
+        tuning=tuning,
     )
     return PredictionResult(
         price_forecast=move["price_forecast"],
@@ -180,6 +184,31 @@ def _bundle(ticker: str, bars: list[Any], hist: dict[str, Any]) -> Phase1Bundle:
     )
 
 
+def _option_pnl(
+    active: dict[str, Any], exit_px: float, exit_i: int
+) -> tuple[float, float]:
+    """Black-Scholes option P&L (delta/gamma/theta; constant IV, no vega).
+
+    Prices the chosen option at entry and at the exit underlying price using
+    the Phase 3 estimated IV and ATM strike, so option trades carry real
+    premium behaviour instead of the old ``(exit - entry) * contracts * 100``
+    proxy.
+    """
+    is_call = active["option_type"] == "call"
+    t_total = float(active["t_total"] or 0.0)
+    strike = float(active["strike"] or 0.0)
+    iv = float(active["iv"] or 0.0)
+    qty = float(active["qty_contracts"] or 0.0)
+    days_held = max(0, exit_i - active["entry_i"])
+    t_remaining = max(0.0, t_total - days_held / _DAY)
+
+    entry_premium = black_scholes_price(active["entry"], strike, t_total, _RFR, iv, is_call)
+    exit_premium = black_scholes_price(exit_px, strike, t_remaining, _RFR, iv, is_call)
+    pnl = round((exit_premium - entry_premium) * qty * 100.0, 2)
+    pnl_pct = round((exit_premium - entry_premium) / entry_premium, 4) if entry_premium > 0 else 0.0
+    return pnl, pnl_pct
+
+
 def _check_exit(active: dict[str, Any], bar: Any) -> tuple[bool, bool, float, str]:
     """Return (stop_hit, target_hit, exit_price, reason) for the current bar."""
     stop = float(active["stop"] or 0.0)
@@ -206,12 +235,24 @@ async def _fetch_bars(settings: Settings, ticker: str, days_back: int) -> list[A
 
 
 async def run_backtest(
-    settings: Settings, ticker: str, months: int = 6, journal: TradeJournal | None = None,
+    settings: Settings,
+    ticker: str,
+    months: int = 6,
+    journal: TradeJournal | None = None,
+    tuning: TuningConfig | None = None,
+    bars: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Run a deterministic backtest and journal every cycle + simulated trade."""
+    """Run a deterministic backtest and journal every cycle + simulated trade.
+
+    ``tuning`` optionally overrides the deterministic weights so the tuning
+    harness can sweep a grid without editing code.  ``bars`` may be supplied to
+    skip the (network) fetch — used by the harness to reuse one fetch across
+    many configs.
+    """
     journal = journal or TradeJournal("backtest_journal.db")
     days_back = _WARMUP + int(_DAY * max(1, months) / 12.0)
-    bars = await _fetch_bars(settings, ticker, days_back)
+    if bars is None:
+        bars = await _fetch_bars(settings, ticker, days_back)
 
     if len(bars) < _WARMUP + 10:
         return {"summary": f"Insufficient history for {ticker} ({len(bars)} bars).",
@@ -227,9 +268,9 @@ async def run_backtest(
         if active is None:
             hist = _hist_from_bars(window)
             bundle = _bundle(ticker, window, hist)
-            prediction = _predict(bundle)
-            risk = _risk_compute(bundle, prediction, [], settings, [])
-            decision = _decision_decide(bundle, prediction, risk, settings, [])
+            prediction = _predict(bundle, tuning)
+            risk = _risk_compute(bundle, prediction, [], settings, [], tuning)
+            decision = _decision_decide(bundle, prediction, risk, settings, [], tuning)
 
             journal.record_cycle(str(window[-1].date), ticker, decision.trade_decision,
                                  decision.composite_bias, decision.confidence_score,
@@ -237,12 +278,18 @@ async def run_backtest(
 
             if decision.trade_decision in ("long_equity", "long_call", "long_put"):
                 entry_price = float(nxt.open) * (1.0 + _SLIPPAGE)
+                greeks_info = (risk.risk_metrics or {}).get("calculate_greeks", {}) or {}
                 active = {
                     "symbol": ticker, "entry": entry_price, "entry_i": i + 1,
                     "stop": decision.stop_loss, "target": decision.take_profit,
                     "decision": decision.trade_decision,
                     "qty_shares": decision.position_shares,
                     "qty_contracts": decision.option_contracts,
+                    # option pricing parameters (for the faithful P&L model)
+                    "option_type": decision.option_type,
+                    "strike": float(greeks_info.get("strike", 0.0) or 0.0),
+                    "iv": float(risk.iv_used or 0.0) / 100.0,
+                    "t_total": max(1, settings.trade_horizon_days) / _DAY,
                 }
                 entry_ts = str(nxt.date)
                 qty = max(active["qty_shares"], active["qty_contracts"])
@@ -260,14 +307,15 @@ async def run_backtest(
                 exit_px = round(exit_price * (1.0 - _SLIPPAGE), 4)
                 instrument = "option" if active["decision"] in ("long_call", "long_put") else "equity"
                 qty = active["qty_contracts"] if instrument == "option" else active["qty_shares"]
-                mult = 100.0 if instrument == "option" else 1.0
-                pnl = round((exit_px - active["entry"]) * qty * mult, 2)
+                pnl, pnl_pct = _option_pnl(active, exit_px, i + 1) if instrument == "option" else (
+                    round((exit_px - active["entry"]) * qty, 2),
+                    round((exit_px - active["entry"]) / active["entry"], 4),
+                )
                 journal.record_trade(
                     opened_ts=entry_ts, closed_ts=str(bars[i + 1].date), ticker=ticker,
                     instrument=instrument, option_type=("call" if "call" in active["decision"] else "put") if instrument == "option" else "",
                     symbol=ticker, quantity=qty, entry_price=active["entry"],
-                    exit_price=exit_px, pnl=pnl,
-                    pnl_pct=round((exit_px - active["entry"]) / active["entry"], 4),
+                    exit_price=exit_px, pnl=pnl, pnl_pct=pnl_pct,
                     exit_reason=reason, cycle_ts=str(bars[i + 1].date),
                 )
                 trades += 1

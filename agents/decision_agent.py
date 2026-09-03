@@ -29,6 +29,7 @@ from schemas.risk import RiskResult
 from tools.decision_tools.ranking import rank_opportunities
 from tools.decision_tools.signals import synthesize_signals
 from tools.risk_tools.position_size import calculate_position_size
+from tuning import TuningConfig
 from utils.config import Settings
 
 log = logging.getLogger("market_intel_agent.decision_agent")
@@ -79,7 +80,7 @@ class DecisionAgent(BaseAgent):
         errors: list[str] = []
         try:
             return await asyncio.to_thread(
-                _decide, bundle, prediction, risk, self.settings, errors
+                _decide, bundle, prediction, risk, self.settings, errors, None
             )
         except Exception as exc:  # noqa: BLE001 - degrade gracefully
             log.exception("DecisionAgent failed: %s", exc)
@@ -98,6 +99,7 @@ def _decide(
     risk: RiskResult,
     settings: Settings,
     errors: list[str],
+    tuning: "TuningConfig | None" = None,
 ) -> DecisionResult:
     """Synchronous decision computation (runs in a worker thread)."""
     spot = bundle.market.price
@@ -106,7 +108,7 @@ def _decide(
     # ------------------------------------------------------------------
     # Step 1: directional synthesis
     # ------------------------------------------------------------------
-    sig = synthesize_signals(bundle, prediction, risk)
+    sig = synthesize_signals(bundle, prediction, risk, tuning=tuning)
     composite_bias = sig["composite_bias"]
     agreement = sig["agreement_score"]
 
@@ -114,7 +116,7 @@ def _decide(
     # Step 2: build candidates and re-size the put with Phase 3's tool
     # ------------------------------------------------------------------
     candidates = _build_candidates(
-        bundle, prediction, risk, spot, composite_bias, settings, errors
+        bundle, prediction, risk, spot, composite_bias, settings, errors, tuning
     )
 
     # ------------------------------------------------------------------
@@ -139,6 +141,7 @@ def _decide(
         },
         min_confidence=settings.min_confidence,
         min_risk_reward=settings.min_risk_reward,
+        tuning=tuning,
     )
 
     decision = ranked["trade_decision"]
@@ -204,6 +207,7 @@ def _build_candidates(
     composite_bias: str,
     settings: Settings,
     errors: list[str],
+    tuning: "TuningConfig | None" = None,
 ) -> list[dict[str, Any]]:
     """Build call / put / equity candidates sized deterministically.
 
@@ -252,6 +256,7 @@ def _build_candidates(
             spread_pct=float(greeks.get("spread_pct", 0.0) or 0.0),
             drawdown_risk=_drawdown_risk(bundle),
             max_position_pct=settings.max_position_pct,
+            tuning=tuning,
         )
         if put_size.get("errors"):
             errors.extend(put_size["errors"])
