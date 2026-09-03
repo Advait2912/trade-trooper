@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from alpaca.client import AlpacaClient
 from trading.news_cache import NewsCache, aggregate_daily, fetch_news_range
 from utils.config import load_settings
+from utils.paths import data_path
 
 
 def _load_scorer(device: str | None):
@@ -81,7 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("tickers", help="comma-separated tickers")
     parser.add_argument("--start", required=True, help="start date YYYY-MM-DD")
     parser.add_argument("--end", default=date.today().isoformat(), help="end date YYYY-MM-DD")
-    parser.add_argument("--cache", default="news_cache.db", help="SQLite cache path")
+    parser.add_argument("--cache", default=str(data_path("news_cache.db")),
+                        help="SQLite cache path (default data/news_cache.db)")
     parser.add_argument("--batch-size", type=int, default=64, help="FinBERT batch size")
     parser.add_argument("--device", default=None, help="torch device (default: cuda if available)")
     return parser

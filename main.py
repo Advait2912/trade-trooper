@@ -24,6 +24,7 @@ from schemas.prediction import PredictionResult
 from schemas.risk import RiskResult
 from utils.config import ConfigError, load_settings, validate_ticker
 from utils.logging import setup_logging
+from utils.paths import data_path
 
 
 def _render_prediction(pred: PredictionResult, lines: list[str]) -> None:
@@ -93,8 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--journal",
-        default="trading_journal.db",
-        help="Path to the SQLite journal (default trading_journal.db).",
+        default=str(data_path("trading_journal.db")),
+        help="Path to the SQLite journal (default data/trading_journal.db).",
     )
     parser.add_argument(
         "--news-limit",

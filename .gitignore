@@ -23,6 +23,9 @@ htmlcov/
 *.db
 trade.log
 
+# Runtime artifacts (DBs, weights JSON, journals, logs)
+data/
+
 # IDE
 .idea/
 .vscode/

@@ -69,6 +69,7 @@ from trading.journal import TradeJournal
 from trading.news_cache import NewsCache
 from tuning import DEFAULT_TUNING, TuningConfig
 from utils.config import Settings
+from utils.paths import data_path
 
 log = logging.getLogger("market_intel_agent.backtest")
 
@@ -279,7 +280,7 @@ async def run_backtest(
     many configs.  ``news_cache`` supplies per-day historical sentiment (FinBERT);
     when absent the backtest is news-neutral.
     """
-    journal = journal or TradeJournal("backtest_journal.db")
+    journal = journal or TradeJournal(str(data_path("backtest_journal.db")))
     days_back = _WARMUP + int(_DAY * max(1, months) / 12.0)
     if bars is None:
         bars = await _fetch_bars(settings, ticker, days_back)

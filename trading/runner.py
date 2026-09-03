@@ -28,6 +28,7 @@ from trading.executor import execute_decision
 from trading.journal import TradeJournal
 from trading.position_manager import decide_exit, manage_and_close
 from utils.config import Settings
+from utils.paths import data_path
 
 log = logging.getLogger("market_intel_agent.runner")
 
@@ -65,7 +66,7 @@ class PaperRunner:
         self.settings = settings
         self.ticker = ticker
         self.verbose = verbose
-        self.journal = TradeJournal(journal_path or "trading_journal.db")
+        self.journal = TradeJournal(journal_path or str(data_path("trading_journal.db")))
         # Open-position state (symbol -> opened_ts) is kept in memory and
         # rebuilt from the journal on start.
         self._open_state: dict[str, str] = {}
