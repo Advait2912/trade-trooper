@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system utilities
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-finbert.txt .
+RUN pip install --no-cache-dir -r requirements-finbert.txt
+
+# Pre-cache model weights at build time so container starts instantly
+RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
+    AutoTokenizer.from_pretrained('ProsusAI/finbert'); \
+    AutoModelForSequenceClassification.from_pretrained('ProsusAI/finbert')"
+
+COPY scripts/finbert_service.py scripts/finbert_service.py
+
+EXPOSE 8000
+
+CMD ["python", "scripts/finbert_service.py"]

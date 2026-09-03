@@ -1,4 +1,4 @@
-﻿# trade_trooper
+# trade_trooper
 
 An agentic trading-intelligence pipeline built on **Alpaca's data APIs**
 (simulated/paper trading environment). Agents collect data in parallel, then
@@ -7,7 +7,57 @@ in Python; local LLM reasoning only orchestrates and interprets.
 
 ---
 
-## Architecture (4-phase cycle, ~10s per cycle)
+## Quickstart: Docker Compose Live Trading (11-Stock Universe)
+
+Run the entire multi-stock portfolio trading pipeline with one command.
+
+### 1. Configure Environment
+Copy `.env.docker.example` to `.env.docker` (or edit `.env.docker`) with your Alpaca Paper Trading API keys:
+```bash
+cp .env.docker.example .env.docker
+# Edit ALPACA_API_KEY and ALPACA_API_SECRET in .env.docker
+```
+
+### 2. Start the Stack
+```bash
+docker compose up -d --build
+```
+This automatically:
+- Downloads and pre-caches the **FinBERT** financial sentiment model inside the container.
+- Spins up the shared **FinBERT microservice** (`finbert-service`) on port 8000 (< 50ms batch scoring).
+- Starts the **unified Portfolio Runner** (`trade-portfolio`), analyzing all 11 tickers (`NVDA, AAPL, MSFT, AMD, JPM, BAC, V, GS, TSLA, XOM, KO`) in parallel every 5 minutes.
+- Uses **< 1.1 GB total RAM** and zero external cloud LLM dependencies.
+
+### 3. Monitor Execution & Logs
+```bash
+# Stream live trader decisions and execution benchmarks
+docker logs -f trade-portfolio
+
+# Check structured JSONL decision audit trails
+tail -f data/logs/decisions_*.jsonl
+```
+
+---
+
+## Performance: Optuna Tuned Weights
+
+Trade Trooper includes pre-tuned weights in `data/weights_db.json`, resolved dynamically per sector:
+
+| Universe (11 Tickers, 12 Months) | Win Rate | Profit Factor | Net P&L | Max Drawdown |
+|:---|:---:|:---:|:---:|:---:|
+| **Untuned Baseline** | 34.4% | 0.88 | -$5,465.62 🔴 | -$5,912.17 |
+| **Optuna Industry Weights (`data/weights_db.json`)** | **57.4%** | **1.71** | **+$5,018.83 🟢** | **-$720.36** |
+
+Top individual assets:
+- **AMD**: 83.3% win rate, 11.28 Profit Factor, +$732.08
+- **GS**: 69.2% win rate, 2.38 Profit Factor, +$829.64
+- **NVDA**: 64.0% win rate, 2.31 Profit Factor, +$775.72
+- **BAC**: 59.1% win rate, 1.66 Profit Factor, +$897.37
+- **XOM**: 53.3% win rate, 2.11 Profit Factor, +$638.05
+
+---
+
+## Architecture (4-phase cycle, ~2s per universe)
 
 ```
 PHASE 1 (Parallel data collection - 4 seconds):

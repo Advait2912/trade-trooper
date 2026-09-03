@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  finbert:
+    build:
+      context: .
+      dockerfile: Dockerfile.finbert
+    container_name: finbert-service
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  trader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trade-portfolio
+    command: python main.py --universe NVDA,AAPL,MSFT,AMD,JPM,BAC,V,GS,TSLA,XOM,KO --trade
+    env_file: .env.docker
+    environment:
+      - FINBERT_URL=http://finbert:8000
+      - ENABLE_WEB_RESEARCH=false
+      - ENABLE_LLM_SYNTHESIS=false
+      - TRADING_ENABLED=true
+      - TRADING_INTERVAL_MIN=5
+      - MAX_OPEN_POSITIONS=5
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      finbert:
+        condition: service_healthy
+    restart: unless-stopped
