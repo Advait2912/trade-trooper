@@ -3,9 +3,10 @@
 Phases (per the phase architecture):
   PHASE 1 (parallel collection, ~4s): News Collection Agent, Market Data
       Agent, Historical Data Agent run concurrently.
-  PHASE 2 (sequential, ~3s): Prediction Agent (placeholder).
-  PHASE 3 (sequential, ~2s): Risk Agent (placeholder).
-  PHASE 4 (sequential, ~1s): Decision Agent (placeholder).
+  PHASE 2 (sequential, ~3s): Prediction Agent (deterministic).
+  PHASE 3 (sequential, ~2s): Risk Agent (options chain + deterministic sizing).
+  PHASE 4 (sequential, ~1s): Decision Agent (deterministic signal synthesis +
+      opportunity ranking into a trade decision).
 
   Followed by: web research (when warranted) and final LLM synthesis into the
   report. Every stage is timed and independently degradable: a failure in one
@@ -36,6 +37,7 @@ from schemas.common import (
     TimeHorizon,
     Trend,
 )
+from schemas.decision import DecisionResult
 from schemas.historical import HistoricalAgentResult
 from schemas.market import MarketData
 from schemas.news import InitialAnalysis, NewsArticle, NewsCollectionResult
@@ -49,7 +51,6 @@ from schemas.pipeline import (
     FinalSynthesis,
     MarketContext,
     NewsRef,
-    PhaseResult,
     SourceRelevance,
     WebResearch,
     WebSource,
@@ -133,14 +134,14 @@ class Pipeline:
             risk = await risk_agent.run(phase1, prediction)
 
         # ---------------------------------------------------------------
-        # PHASE 4 — sequential decision (placeholder)
+        # PHASE 4 — sequential decision (deterministic, no LLM)
         # ---------------------------------------------------------------
-        decision_agent = DecisionAgent()
+        decision_agent = DecisionAgent(self.settings)
         with StageTimer("Phase 4 - decision", log):
             decision = await decision_agent.run(phase1, prediction, risk)
 
         # ---------------------------------------------------------------
-        # Final LLM synthesis
+        # Final LLM synthesis (interprets the deterministic phases)
         # ---------------------------------------------------------------
         synthesis: FinalSynthesis | None = None
         with StageTimer("Final analysis complete", log):
@@ -152,6 +153,9 @@ class Pipeline:
                     web,
                     market,
                     historical,
+                    prediction,
+                    risk,
+                    decision,
                 )
             except OllamaError as exc:
                 log.warning("Final synthesis failed: %s", exc)
@@ -284,6 +288,9 @@ class Pipeline:
         web: WebResearch,
         market: MarketData,
         historical: HistoricalAgentResult,
+        prediction: PredictionResult,
+        risk: RiskResult,
+        decision: DecisionResult,
     ) -> FinalSynthesis:
         async with OllamaClient(self.settings) as ollama:
             return await ollama.synthesize(
@@ -293,6 +300,7 @@ class Pipeline:
                 web_block=_web_block(web),
                 market_block=_market_block(market),
                 historical_block=_historical_block(historical),
+                decision_block=_decision_block(prediction, risk, decision),
                 performed=web.performed,
             )
 
@@ -310,7 +318,7 @@ class Pipeline:
         synthesis: FinalSynthesis | None,
         prediction: PredictionResult,
         risk: RiskResult,
-        decision: PhaseResult,
+        decision: DecisionResult,
     ) -> FinalReport:
         now = datetime.now(timezone.utc).isoformat()
 
@@ -483,6 +491,54 @@ def _historical_block(historical: HistoricalAgentResult) -> str:
     if historical.patterns:
         parts.append(f"Chart patterns: {summarize(historical.patterns)}")
     return "\n".join(parts)
+
+
+def _decision_block(
+    prediction: PredictionResult, risk: RiskResult, decision: DecisionResult
+) -> str:
+    """Concise, deterministic context of Phases 2-4 for the final synthesis."""
+    pred = {
+        "price_forecast": prediction.price_forecast,
+        "price_forecast_high": prediction.price_forecast_high,
+        "price_forecast_low": prediction.price_forecast_low,
+        "expected_move_pct": prediction.expected_move_pct,
+        "composite_signal": prediction.composite_signal,
+        "momentum_score": prediction.momentum_score,
+        "adjusted_momentum": prediction.adjusted_momentum,
+        "iv_forecast": prediction.iv_forecast,
+        "vol_regime": prediction.vol_regime,
+        "confidence": prediction.confidence,
+    }
+    risk_slim = {
+        "risk_score": risk.risk_score,
+        "risk_level": risk.risk_level,
+        "risk_reward_ratio": risk.risk_reward_ratio,
+        "stop_loss_level": risk.stop_loss_level,
+        "take_profit_level": risk.take_profit_level,
+        "greeks_source": risk.greeks_source,
+        "iv_source": risk.iv_source,
+        "spread_pct": risk.spread_pct,
+    }
+    decision_slim = {
+        "trade_decision": decision.trade_decision,
+        "confidence_score": decision.confidence_score,
+        "composite_bias": decision.composite_bias,
+        "agreement_score": decision.agreement_score,
+        "instrument": decision.instrument,
+        "option_type": decision.option_type,
+        "entry_price": decision.entry_price,
+        "stop_loss": decision.stop_loss,
+        "take_profit": decision.take_profit,
+        "rationale": decision.rationale,
+    }
+    return json.dumps(
+        {
+            "Phase 2 Prediction": pred,
+            "Phase 3 Risk": risk_slim,
+            "Phase 4 Decision": decision_slim,
+        },
+        default=str,
+    )
 
 
 def _suggest_trend(md: MarketData) -> Trend:

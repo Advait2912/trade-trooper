@@ -17,6 +17,7 @@ from schemas.common import (
     TimeHorizon,
     Trend,
 )
+from schemas.decision import DecisionResult
 from schemas.historical import HistoricalAgentResult
 from schemas.prediction import PredictionResult
 from schemas.risk import RiskResult
@@ -117,10 +118,15 @@ class FinalSynthesis(BaseModel):
 
 
 class PhaseResult(BaseModel):
-    """Shape returned by Phase 2/3/4 agents while they are not implemented."""
+    """Legacy generic phase-result shell (retained for rollout safety).
+
+    Typed phase results (``PredictionResult``, ``RiskResult``,
+    ``DecisionResult``) supersede this; it only exists to keep the base shape
+    for any still-unimplemented stage.
+    """
 
     phase: str = ""
-    status: str = "not_implemented"  # not_implemented | ok | error
+    status: str = "not_implemented"  # not_implemented | ok | partial | error
     summary: str = ""
     data: dict = Field(default_factory=dict)
 
@@ -138,10 +144,8 @@ class FinalReport(BaseModel):
     historical: HistoricalAgentResult = Field(
         default_factory=lambda: HistoricalAgentResult()
     )
-    prediction: PredictionResult = Field(
-        default_factory=lambda: PredictionResult(status="not_implemented")
-    )
+    prediction: PredictionResult = Field(default_factory=PredictionResult)
     risk: RiskResult = Field(default_factory=lambda: RiskResult())
-    decision: PhaseResult = Field(default_factory=lambda: PhaseResult(phase="decision"))
+    decision: DecisionResult = Field(default_factory=lambda: DecisionResult())
     analysis: Analysis = Field(default_factory=lambda: Analysis())
     council_input: CouncilInput = Field(default_factory=lambda: CouncilInput())

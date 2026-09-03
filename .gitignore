@@ -19,6 +19,10 @@ env/
 .coverage
 htmlcov/
 
+# Trading artifacts
+*.db
+trade.log
+
 # IDE
 .idea/
 .vscode/

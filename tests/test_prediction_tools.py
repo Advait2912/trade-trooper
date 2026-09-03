@@ -6,8 +6,6 @@ Synthetic indicator dicts are constructed directly.
 
 from __future__ import annotations
 
-import pytest
-
 from schemas.market import MarketData
 from tools.prediction_tools.price_move import estimate_price_move
 from tools.prediction_tools.technical import (
@@ -15,7 +13,6 @@ from tools.prediction_tools.technical import (
     calculate_technical_indicators,
 )
 from tools.prediction_tools.volatility_forecast import forecast_volatility
-
 
 # ===========================================================================
 # Helpers: synthetic Phase 1 technical dicts

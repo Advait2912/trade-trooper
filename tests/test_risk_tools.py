@@ -83,6 +83,16 @@ class TestCalculateGreeks:
         assert result["spread_pct"] > 0.0
         assert result["implied_move_pct"] > 0.0
 
+    def test_chain_occ_symbols_exposed(self):
+        result = calculate_greeks(_CHAIN, 150.0, 30.0, 5)
+        assert result["call_symbol"] == "NVDA260918C00150000"
+        assert result["put_symbol"] == "NVDA260918P00150000"
+
+    def test_fallback_occ_symbols_empty(self):
+        result = calculate_greeks([], 150.0, 30.0, 5)
+        assert result["call_symbol"] == ""
+        assert result["put_symbol"] == ""
+
     def test_fallback_source(self):
         result = calculate_greeks(None, 150.0, 30.0, 5)
         assert result["greeks_source"] == "black_scholes_estimated"
@@ -230,8 +240,34 @@ class TestCalculateRiskScore:
 
     def test_clamped_at_extremes(self):
         worst = calculate_risk_score(
-            vol_regime="very_high", iv_percentile=100.0, drawdown_risk="extreme",
-            gap_frequency="very_frequent", spread_pct=1.0, max_loss_pct=0.5, confidence=0.0,
+            vol_regime="very_high", iv_percentile=99.0, drawdown_risk="extreme",
+            gap_frequency="very_frequent", spread_pct=0.3, max_loss_pct=0.2, confidence=0.0,
         )
-        assert worst["risk_score"] <= 100.0
+        assert 0.0 <= worst["risk_score"] <= 100.0
         assert worst["risk_level"] == "very_high"
+
+    def test_moderate_mix_stays_tradable(self):
+        # A normal liquid stock (high-ish vol, some gaps, moderate drawdown,
+        # normal stop, low confidence) must NOT be clamped to very_high.
+        result = calculate_risk_score(
+            vol_regime="high", iv_percentile=90.0, drawdown_risk="moderate",
+            gap_frequency="very_frequent", spread_pct=0.02, max_loss_pct=0.095, confidence=0.4,
+        )
+        assert result["risk_score"] < 75
+        assert result["risk_level"] in ("moderate", "high")
+
+    def test_calm_mix_scores_low(self):
+        result = calculate_risk_score(
+            vol_regime="low", iv_percentile=20.0, drawdown_risk="low",
+            gap_frequency="rare", spread_pct=0.01, max_loss_pct=0.03, confidence=0.9,
+        )
+        assert result["risk_score"] < 25
+        assert result["risk_level"] == "low"
+
+    def test_components_normalized_range(self):
+        result = calculate_risk_score(
+            vol_regime="very_high", iv_percentile=99.0, drawdown_risk="extreme",
+            gap_frequency="very_frequent", spread_pct=0.15, max_loss_pct=0.14, confidence=0.0,
+        )
+        comps = result["components"]
+        assert all(0.0 <= comps[k] <= 1.0 for k in ("vol", "drawdown", "gap", "spread", "max_loss", "confidence"))

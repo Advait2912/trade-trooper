@@ -4,32 +4,40 @@
 0–100 score (higher = riskier) so the risk level is a bucket of one auditable
 number rather than a chain of branches.  ``risk_reward_ratio`` is the classic
 reward / risk for the proposed entry/stop/target.
+
+The composite is a *normalized weighted risk budget*: each factor is mapped to
+a 0..1 sub-score and combined with fixed weights against a neutral base.  This
+keeps the score spread across the whole 0..100 range (a calm stock scores low,
+a genuinely adverse setup scores very_high) instead of saturating at 100 the
+moment a couple of factors are elevated.  ``max_loss_pct`` is position-relative
+(the stop distance as a fraction of entry), not capital-relative, and is
+normalised accordingly.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-_VOL_REGIME_SCORE: dict[str, float] = {
-    "low": -10.0,
-    "normal": 0.0,
-    "high": 15.0,
-    "very_high": 25.0,
-}
+# Sub-score (0..1) maps for the qualitative signals.  Lower is safer.
+_VOL_REGIME: dict[str, float] = {"low": 0.05, "normal": 0.35, "high": 0.65, "very_high": 0.95}
+_DRAWDOWN: dict[str, float] = {"low": 0.10, "moderate": 0.40, "high": 0.70, "extreme": 0.95}
+_GAP: dict[str, float] = {"rare": 0.10, "occasional": 0.30, "frequent": 0.60, "very_frequent": 0.85}
 
-_DRAWDOWN_SCORE: dict[str, float] = {
-    "low": 0.0,
-    "moderate": 10.0,
-    "high": 20.0,
-    "extreme": 30.0,
+# Relative importance of each factor (sums to 1.0 with the base).
+_FACTOR_WEIGHTS: dict[str, float] = {
+    "vol": 0.22,
+    "drawdown": 0.16,
+    "gap": 0.12,
+    "spread": 0.10,
+    "max_loss": 0.20,
+    "confidence": 0.12,
 }
+_BASE_WEIGHT = 0.08
+_MAX_LOSS_SPAN = 12.0  # % of entry mapped to 0..1 (2% -> 0, 14% -> 1)
 
-_GAP_SCORE: dict[str, float] = {
-    "rare": 0.0,
-    "occasional": 5.0,
-    "frequent": 12.0,
-    "very_frequent": 20.0,
-}
+
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
 
 
 def risk_reward_ratio(entry: float, stop: float, target: float) -> float:
@@ -52,26 +60,37 @@ def calculate_risk_score(
 ) -> dict[str, Any]:
     """Aggregate risk signals into a 0–100 score and a risk level.
 
-    Base 50 (neutral), then:
-        vol_regime       : low -10 / normal 0 / high +15 / very_high +25
-        iv_percentile    : (percentile - 50) * 0.4
-        drawdown_risk    : low 0 / moderate +10 / high +20 / extreme +30
-        gap_frequency    : rare 0 / occasional +5 / frequent +12 / very_frequent +20
-        spread_pct       : + spread * 300
-        max_loss_pct     : + max_loss * 200
-        confidence       : -(confidence - 0.5) * 40   (higher confidence lowers risk)
+    Each deterministic signal is mapped to a 0..1 sub-score and combined by
+    fixed weight against a neutral ``base`` (score = 100 * (base + Σ w_i·f_i)).
+    Sub-scores:
 
-    Returns dict with ``risk_score``, ``risk_level`` and the components.
+        vol_regime     : low 0.05 / normal 0.35 / high 0.65 / very_high 0.95
+        iv_percentile  : folds into the vol sub-score (percentile/100)
+        drawdown_risk  : low 0.10 / moderate 0.40 / high 0.70 / extreme 0.95
+        gap_frequency  : rare 0.10 / occasional 0.30 / frequent 0.60 / very_frequent 0.85
+        spread_pct     : spread / 0.15 (10% + spread is fully risky)
+        max_loss_pct   : position stop distance % mapped over 2%..14%
+        confidence     : 1 - confidence (low confidence -> higher risk)
+
+    Returns dict with ``risk_score``, ``risk_level`` and the ``components``.
     """
-    vol = _VOL_REGIME_SCORE.get(vol_regime, 0.0)
-    dd = _DRAWDOWN_SCORE.get(drawdown_risk, 0.0)
-    gap = _GAP_SCORE.get(gap_frequency, 0.0)
-    iv = (iv_percentile - 50.0) * 0.4
-    spread = spread_pct * 300.0
-    ml = max_loss_pct * 200.0
-    conf = -(confidence - 0.5) * 40.0
+    vol_sub = _clamp01(0.6 * _VOL_REGIME.get(vol_regime, 0.35) + 0.4 * (iv_percentile / 100.0))
+    dd_sub = _DRAWDOWN.get(drawdown_risk, 0.10)
+    gap_sub = _GAP.get(gap_frequency, 0.10)
+    spread_sub = _clamp01(spread_pct / 0.15)
+    max_loss_sub = _clamp01((max_loss_pct * 100.0 - 2.0) / _MAX_LOSS_SPAN)
+    conf_sub = _clamp01(1.0 - max(0.0, min(1.0, confidence)))
 
-    score = 50.0 + vol + iv + dd + gap + spread + ml + conf
+    weighted = (
+        _FACTOR_WEIGHTS["vol"] * vol_sub
+        + _FACTOR_WEIGHTS["drawdown"] * dd_sub
+        + _FACTOR_WEIGHTS["gap"] * gap_sub
+        + _FACTOR_WEIGHTS["spread"] * spread_sub
+        + _FACTOR_WEIGHTS["max_loss"] * max_loss_sub
+        + _FACTOR_WEIGHTS["confidence"] * conf_sub
+    )
+    total_weight = sum(_FACTOR_WEIGHTS.values()) + _BASE_WEIGHT
+    score = 100.0 * (_BASE_WEIGHT + weighted) / total_weight
     score = max(0.0, min(100.0, score))
 
     if score < 25:
@@ -87,13 +106,12 @@ def calculate_risk_score(
         "risk_score": round(score, 1),
         "risk_level": level,
         "components": {
-            "base": 50.0,
-            "vol_regime": round(vol, 2),
-            "iv_percentile": round(iv, 2),
-            "drawdown": round(dd, 2),
-            "gap_frequency": round(gap, 2),
-            "spread": round(spread, 2),
-            "max_loss": round(ml, 2),
-            "confidence": round(conf, 2),
+            "base": round(_BASE_WEIGHT * 100.0 / total_weight, 2),
+            "vol": round(vol_sub, 4),
+            "drawdown": round(dd_sub, 4),
+            "gap": round(gap_sub, 4),
+            "spread": round(spread_sub, 4),
+            "max_loss": round(max_loss_sub, 4),
+            "confidence": round(conf_sub, 4),
         },
     }

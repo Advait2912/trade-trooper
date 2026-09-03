@@ -21,9 +21,7 @@ ADX weight is discounted by trend_strength for weak or no-trend conditions.
 
 from __future__ import annotations
 
-import math
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Indicator weights (must sum to 1.0)
