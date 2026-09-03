@@ -32,4 +32,7 @@ data/*
 .vscode/
 *.swp
 .DS_Store
+scratch/
 JULES_REPORT.md
+docs/SUBMISSION_WRITEUP.md
+docs/assets/

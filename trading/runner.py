@@ -94,6 +94,24 @@ class PortfolioRunner:
         self._rebuild_open_state()
         interval = max(1, self.settings.trading_interval_min) * 60
         log.info("PortfolioRunner started for %s (interval %ds)", self.tickers, interval)
+
+        # Alpaca CLI Preflight Check
+        try:
+            from tools import alpaca_cli
+            if alpaca_cli.is_available():
+                alpaca_cli.ensure_profile_login(
+                    self.settings.alpaca_api_key,
+                    self.settings.alpaca_api_secret,
+                    paper=True,
+                )
+                doc = alpaca_cli.cli_doctor()
+                if doc.get("ok"):
+                    log.info("Alpaca CLI doctor: PASSED (connected to paper endpoint)")
+                else:
+                    log.warning("Alpaca CLI doctor check: %s", doc.get("error") or doc.get("stdout"))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Alpaca CLI preflight check bypassed: %s", exc)
+
         while True:
             if not is_market_open():
                 log.debug("market closed - skipping cycle")
