@@ -6,14 +6,12 @@ All tests are fully offline — no HTTP, no LLM.
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
 
 from agents.prediction_agent import PredictionAgent
 from schemas.historical import HistoricalAgentResult, VolatilityPoint
 from schemas.market import MarketData
 from schemas.news import InitialAnalysis, NewsArticle, NewsCollectionResult
 from schemas.prediction import Phase1Bundle, PredictionResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers: build a realistic Phase1Bundle without any API

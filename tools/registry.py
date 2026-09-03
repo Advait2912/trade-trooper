@@ -267,12 +267,17 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
         "description": "Identify significant trading events (earnings gaps, vol spikes, etc.)",
     },
     # ------------------------------------------------------------------
-    # Phase 2 - Prediction Agent (placeholder)
+    # Phase 2 - Prediction Agent
     # ------------------------------------------------------------------
     "calculate_technical_indicators": {
         "phase": 2,
         "agent": "prediction",
         "description": "Calculate technical indicators for prediction",
+    },
+    "apply_news_adjustment": {
+        "phase": 2,
+        "agent": "prediction",
+        "description": "Adjust the technical momentum by deterministic news sentiment",
     },
     "forecast_volatility": {
         "phase": 2,
@@ -285,7 +290,7 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
         "description": "Estimate expected price move",
     },
     # ------------------------------------------------------------------
-    # Phase 3 - Risk Agent (placeholder)
+    # Phase 3 - Risk Agent
     # ------------------------------------------------------------------
     "calculate_greeks": {
         "phase": 3,
@@ -308,7 +313,7 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
         "description": "Aggregate risk signals into a 0-100 composite risk score",
     },
     # ------------------------------------------------------------------
-    # Phase 4 - Decision Agent (placeholder)
+    # Phase 4 - Decision Agent
     # ------------------------------------------------------------------
     "synthesize_signals": {
         "phase": 4,
@@ -363,10 +368,16 @@ def import_handlers(tool_names: list[str] | None = None) -> dict[str, Callable[.
         "calculate_returns": "tools.historical.risk_stats",
         "generate_technical_summary": "tools.historical.summary",
         "identify_trading_events": "tools.historical.events",
+        "calculate_technical_indicators": "tools.prediction_tools.technical",
+        "apply_news_adjustment": "tools.prediction_tools.technical",
+        "forecast_volatility": "tools.prediction_tools.volatility_forecast",
+        "estimate_price_move": "tools.prediction_tools.price_move",
         "calculate_greeks": "tools.risk_tools.greeks",
         "calculate_position_size": "tools.risk_tools.position_size",
         "calculate_max_loss": "tools.risk_tools.max_loss",
         "calculate_risk_score": "tools.risk_tools.risk_score",
+        "synthesize_signals": "tools.decision_tools.signals",
+        "rank_opportunities": "tools.decision_tools.ranking",
     }
 
     wanted = list(tool_names) if tool_names is not None else list(TOOL_SPECS)

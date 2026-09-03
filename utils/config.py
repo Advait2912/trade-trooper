@@ -59,6 +59,9 @@ class Settings:
     max_position_pct: float = 0.05      # cap on position as a fraction of capital
     min_risk_reward: float = 1.0        # minimum reward/risk (surfaced to Phase 4)
 
+    # Decision (Phase 4).
+    min_confidence: float = 0.35        # minimum prediction confidence to trade
+
     def __post_init__(self) -> None:
         self._normalize()
 
@@ -116,10 +119,11 @@ def load_settings() -> Settings:
         risk_per_trade_pct = float(_env("RISK_PER_TRADE_PCT", "0.01"))
         max_position_pct = float(_env("MAX_POSITION_PCT", "0.05"))
         min_risk_reward = float(_env("MIN_RISK_REWARD", "1.0"))
+        min_confidence = float(_env("MIN_CONFIDENCE", "0.35"))
     except ValueError as exc:  # pragma: no cover - defensive
         raise ConfigError(
-            "ACCOUNT_CAPITAL, RISK_PER_TRADE_PCT, MAX_POSITION_PCT and "
-            "MIN_RISK_REWARD must be numbers."
+            "ACCOUNT_CAPITAL, RISK_PER_TRADE_PCT, MAX_POSITION_PCT, "
+            "MIN_RISK_REWARD and MIN_CONFIDENCE must be numbers."
         ) from exc
 
     return Settings(
@@ -144,4 +148,5 @@ def load_settings() -> Settings:
         risk_per_trade_pct=risk_per_trade_pct,
         max_position_pct=max_position_pct,
         min_risk_reward=min_risk_reward,
+        min_confidence=min_confidence,
     )

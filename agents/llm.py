@@ -76,6 +76,7 @@ class OllamaClient:
         web_block: str,
         market_block: str,
         historical_block: str,
+        decision_block: str,
         performed: bool,
     ) -> FinalSynthesis:
         prompt = prompts.build_final_prompt(
@@ -85,6 +86,7 @@ class OllamaClient:
             web_block=web_block,
             market_block=market_block,
             historical_block=historical_block,
+            decision_block=decision_block,
             performed=performed,
         )
         return await self._complete(

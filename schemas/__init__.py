@@ -18,6 +18,7 @@ from schemas.common import (
     TimeHorizon,
     Trend,
 )
+from schemas.decision import DecisionGate, DecisionResult, Opportunity
 from schemas.historical import (
     DividendRecord,
     EarningsRecord,
@@ -55,6 +56,8 @@ __all__ = [
     "Analysis",
     "Bias",
     "CouncilInput",
+    "DecisionGate",
+    "DecisionResult",
     "DividendRecord",
     "EarningsRecord",
     "EventAssessment",
@@ -65,6 +68,7 @@ __all__ = [
     "FinalSynthesis",
     "Greeks",
     "EquityPosition",
+    "Opportunity",
     "OptionPosition",
     "PositionRecommendation",
     "HistoricalAgentResult",

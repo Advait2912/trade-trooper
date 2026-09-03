@@ -101,6 +101,9 @@ D. Market data and technical indicators:
 E. Historical data and technical analysis:
 {historical_block}
 
+F. Deterministic prediction / risk / decision (Phases 2-4):
+{decision_block}
+
 Requirements:
 - Distinguish FACTS, INFERENCES, and UNCERTAINTIES.
 - Do NOT translate bullish news automatically into a buy. You may conclude \
@@ -112,6 +115,10 @@ evidence, or insufficient evidence.
 above (empty if none was performed).
 - Use the historical context to corroborate or challenge the news-driven \
 narrative, but never invent numbers.
+- Your "council_input" must be consistent with the deterministic Phase 4 \
+decision block: if it says long_call/long_put/long_equity, your \
+recommended_bias should agree (bullish/bearish) rather than contradict it. \
+Never invent prices or levels that are not already in the inputs.
 
 Return a JSON object with exactly these fields:
 {{
@@ -173,6 +180,7 @@ def build_final_prompt(
     web_block: str,
     market_block: str,
     historical_block: str,
+    decision_block: str,
     performed: bool,
 ) -> str:
     return FINAL_SYNTHESIS_PROMPT.format(
@@ -182,5 +190,6 @@ def build_final_prompt(
         web_block=web_block,
         market_block=market_block,
         historical_block=historical_block,
+        decision_block=decision_block,
         performed="true" if performed else "false",
     )

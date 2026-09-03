@@ -15,11 +15,46 @@ import sys
 
 from agents.historical_agent import HistoricalAgent
 from orchestrator.pipeline import Pipeline
+from schemas.decision import DecisionResult
 from schemas.historical import HistoricalAgentResult
 from schemas.pipeline import FinalReport
+from schemas.prediction import PredictionResult
 from schemas.risk import RiskResult
 from utils.config import ConfigError, load_settings, validate_ticker
 from utils.logging import setup_logging
+
+
+def _render_prediction(pred: PredictionResult, lines: list[str]) -> None:
+    """Human-readable PHASE 2 prediction block."""
+    lines.append(f"Status: {pred.status}")
+    lines.append(
+        f"Signal: {pred.composite_signal} (momentum {pred.momentum_score:+.2f}, "
+        f"adjusted {pred.adjusted_momentum:+.2f})"
+    )
+    lines.append(f"Forecast: ${pred.price_forecast:.2f} "
+                 f"[{pred.price_forecast_low:.2f} — {pred.price_forecast_high:.2f}] "
+                 f"({pred.expected_move_pct * 100:+.2f}%, {pred.forecast_horizon_days}d)")
+    lines.append(f"Vol forecast: {pred.iv_forecast:.1f}% ({pred.vol_regime})")
+    lines.append(f"Confidence: {pred.confidence:.2f}")
+
+
+def _render_decision(decision: DecisionResult, lines: list[str]) -> None:
+    """Human-readable PHASE 4 decision block."""
+    lines.append(f"Status: {decision.status}")
+    lines.append(f"Decision: {decision.trade_decision.replace('_', ' ').title()}")
+    lines.append(f"Bias: {decision.composite_bias} (agreement {decision.agreement_score:.2f})")
+    if decision.entry_price:
+        lines.append(f"Entry: ${decision.entry_price:.2f}  Stop: ${decision.stop_loss:.2f}  "
+                     f"Target: ${decision.take_profit:.2f}")
+    if decision.instrument == "option" and decision.option_type:
+        lines.append(f"Instrument: long {decision.option_type} "
+                     f"({decision.option_contracts:.0f} contracts, "
+                     f"premium risk ${decision.premium_risk:,.0f})")
+    elif decision.instrument == "equity":
+        lines.append(f"Instrument: equity ({decision.position_shares:.0f} shares)")
+    lines.append(f"Confidence: {decision.confidence_score:.2f}")
+    if decision.rationale:
+        lines.append(f"Rationale: {decision.rationale}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -188,7 +223,7 @@ def render_report(report: FinalReport, verbose: bool = False) -> str:
     lines.append("")
 
     hist = report.historical
-    if hist.status != "not_implemented" and hist.bars_count:
+    if hist.bars_count:
         lines.append("HISTORICAL CONTEXT")
         lines.append("-" * 19)
         trend = hist.historical_trends.get("trend", "n/a")
@@ -197,16 +232,17 @@ def render_report(report: FinalReport, verbose: bool = False) -> str:
         lines.append(f"Technical signal: {summary}")
         lines.append("")
 
-    phs = [("PHASE 2", report.prediction), ("PHASE 4", report.decision)]
-    for label, ph in phs:
-        lines.append(label)
-        lines.append("-" * len(label))
-        lines.append(f"Status: {ph.status}")
-        if ph.summary:
-            lines.append(ph.summary)
-        lines.append("")
+    lines.append("PHASE 2 — PREDICTION")
+    lines.append("-" * 19)
+    _render_prediction(report.prediction, lines)
+    lines.append("")
 
     lines.extend(_render_risk(report.risk))
+
+    lines.append("PHASE 4 — DECISION")
+    lines.append("-" * 17)
+    _render_decision(report.decision, lines)
+    lines.append("")
 
     a = report.analysis
     lines.append("ASSESSMENT")

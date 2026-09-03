@@ -25,7 +25,7 @@ PHASE 1 (Parallel data collection - 4 seconds):
       └─ Returns: historical_trends, volatility_history
 
 PHASE 2 (Sequential prediction - 3 seconds):
-  └─ Prediction Agent (input: all Phase 1 results)      [placeholder]
+  └─ Prediction Agent (input: all Phase 1 results)
       ├─ Calls: calculate_technical_indicators()
       ├─ Calls: forecast_volatility()
       ├─ Calls: estimate_price_move()
@@ -40,9 +40,9 @@ PHASE 3 (Sequential risk - 2 seconds):
       └─ Returns: risk_metrics, position_recommendation
 
 PHASE 4 (Sequential decision - 1 second):
-  └─ Decision Agent (input: all previous results)       [placeholder]
-      ├─ Calls: synthesize_signals()
-      ├─ Calls: rank_opportunities()
+  └─ Decision Agent (input: all previous results)
+      ├─ Calls: synthesize_signals()        (weighted signal vote → bias + agreement)
+      ├─ Calls: rank_opportunities()        (gates + scores call/put/equity candidates)
       └─ Returns: trade_decision, confidence_score
 
 Total: ~10 seconds per trading cycle
@@ -50,14 +50,17 @@ Total: ~10 seconds per trading cycle
 
 The orchestrator (`orchestrator/pipeline.py`) additionally runs web research
 (when warranted) and a final LLM synthesis into the intelligence report.
+Because every phase is deterministic, the final LLM synthesis is given the
+Phase 2–4 decision context so its narrative and `council_input` stay consistent
+with the computed decision.
 
 ### Repo layout
 
 | Module | Purpose |
 |-------|---------|
-| `agents/` | The 6 agents (phase 1 collection; phase 2-3 implemented; phase 4 placeholder) + LLM client |
+| `agents/` | The 6 agents (phase 1 collection; phase 2-4 all implemented) + LLM client |
 | `tools/` | Deterministic tool suite + `registry.py` (tool specs) |
-| `schemas/` | Pydantic models (news / market / historical / prediction / risk / pipeline) |
+| `schemas/` | Pydantic models (news / market / historical / prediction / risk / decision / pipeline) |
 | `orchestrator/` | Phase-based pipeline + phase timing budgets |
 | `alpaca/` | Alpaca data layer (news, market data, historical, options) |
 | `web/` | Web research (Ollama search/fetch) |
@@ -78,6 +81,30 @@ long-only options, scaled by confidence / IV quality / spread / drawdown), a
 gap-inflated max loss with a VaR/CVaR tail, and a composite 0–100 risk score.
 When the options feed is unavailable (no subscription) it degrades gracefully
 to Phase 2's estimated IV and local Black-Scholes greeks.
+
+The **Decision Agent** (Phase 4, implemented) is the final deterministic
+stage. `synthesize_signals` votes across every directional signal (news
+sentiment, the historical technical summary, the historical trend, the Phase 2
+composite signal, and market trend) into a `composite_bias` plus an
+`agreement_score` and an auditable `divergences` list. `rank_opportunities`
+then gates and scores up to three trade candidates — **long call**, **long
+put**, and **long equity** — and returns a `trade_decision`
+(`long_call | long_put | long_equity | hold | avoid`) with a
+`confidence_score`.
+
+The agent is:
+- **bullish** → long call (or long equity), sized by Phase 3;
+- **bearish** → long put. The Decision Agent re-sizes the put itself using
+  Phase 3's position-size tool with the put premium + |put delta| (Phase 3
+  only sizes calls), so bearish plays carry defined-risk premium;
+- **neutral / gated-out** → `hold`; **very high risk** → `avoid`;
+  **no price / prediction error** → `hold` with `status="insufficient_data"`.
+
+Deterministic gates: `prediction.confidence >= MIN_CONFIDENCE`,
+`risk_reward_ratio >= MIN_RISK_REWARD`, and `risk_level != very_high`. Each
+candidate is scored 0–100 (signal/agreement 40%, reward:risk 25%, risk quality
+20%, execution quality 15%) so the best instrument wins, and the result
+carries a `decision_metrics` audit dict for transparency.
 
 ---
 
@@ -106,10 +133,11 @@ Copy `.env.example` to `.env` and fill in your keys:
 | `ALPACA_API_SECRET` | yes | Alpaca API secret |
 | `ALPACA_DATA_FEED` | no | `iex` (free) or `sip` (paid); default `iex` |
 | `ALPACA_OPTIONS_FEED` | no | `indicative` (free, delayed) or `opra` (paid); default `indicative` |
-| `ACCOUNT_CAPITAL` | no | capital base for position sizing; default `100000` |
+ | `ACCOUNT_CAPITAL` | no | capital base for position sizing; default `100000` |
 | `RISK_PER_TRADE_PCT` | no | fraction of capital risked per trade; default `0.01` |
 | `MAX_POSITION_PCT` | no | cap on position as a fraction of capital; default `0.05` |
-| `MIN_RISK_REWARD` | no | minimum reward/risk surfaced to the Decision Agent; default `1.0` |
+| `MIN_RISK_REWARD` | no | minimum reward/risk gate for the Decision Agent; default `1.0` |
+| `MIN_CONFIDENCE` | no | minimum prediction confidence gate for the Decision Agent; default `0.35` |
 | `OLLAMA_BASE_URL` | no | local Ollama base URL (default `http://localhost:11434`) |
 | `OLLAMA_MODEL` | no | model tag (default `gemma4:e4b`) |
 | `OLLAMA_API_KEY` | no* | API key for Ollama web search (or run `ollama signin`) |

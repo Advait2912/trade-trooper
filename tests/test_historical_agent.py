@@ -113,3 +113,33 @@ def test_registry_import_handlers_resolve():
     assert callable(handlers["calculate_rsi"])
     assert callable(handlers["generate_technical_summary"])
     assert callable(handlers["identify_trend"])
+
+
+def test_registry_import_handlers_all_phases():
+    from tools.registry import import_handlers
+
+    handlers = import_handlers(
+        [
+            "calculate_technical_indicators",
+            "forecast_volatility",
+            "estimate_price_move",
+            "calculate_greeks",
+            "calculate_position_size",
+            "calculate_max_loss",
+            "calculate_risk_score",
+            "synthesize_signals",
+            "rank_opportunities",
+        ]
+    )
+    for name in [
+        "calculate_technical_indicators",
+        "forecast_volatility",
+        "estimate_price_move",
+        "calculate_greeks",
+        "calculate_position_size",
+        "calculate_max_loss",
+        "calculate_risk_score",
+        "synthesize_signals",
+        "rank_opportunities",
+    ]:
+        assert callable(handlers[name]), f"{name} handler not resolved"
