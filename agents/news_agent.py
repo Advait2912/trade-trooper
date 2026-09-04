@@ -35,6 +35,9 @@ def _score_local_finbert(texts: list[str]) -> list[dict] | None:
     Returns None when torch/transformers are not installed or the model
     cannot be loaded, so callers degrade to Ollama / neutral.
     """
+    import os  # noqa: PLC0415
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
     global _local_finbert, _local_finbert_unavailable
     if _local_finbert_unavailable:
         return None

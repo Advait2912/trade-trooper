@@ -106,11 +106,9 @@ class NewsCache:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # WAL + busy timeout so concurrent cache-build processes can share the
-        # DB without "database is locked" failures.
-        self._conn = sqlite3.connect(str(self._path), timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=30000")
+        self._conn = sqlite3.connect(str(self._path), timeout=60.0)
+        self._conn.execute("PRAGMA synchronous=NORMAL;")
+        self._conn.execute("PRAGMA busy_timeout=60000;")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -124,16 +122,17 @@ class NewsCache:
     # ---- writes ----
     def add_articles(self, ticker: str, articles: list[NewsArticle]) -> int:
         """Insert articles (idempotent by id); returns the count of new rows."""
-        added = 0
-        for a in articles:
-            cur = self._conn.execute(
-                "INSERT OR IGNORE INTO news_articles "
-                "(id, ticker, created_at, headline, summary, source, symbols) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (a.id, ticker, a.created_at, a.headline, a.summary, a.source,
-                 ",".join(a.symbols)),
-            )
-            added += cur.rowcount
+        rows = [
+            (a.id, ticker, a.created_at, a.headline, a.summary, a.source, ",".join(a.symbols))
+            for a in articles
+        ]
+        cur = self._conn.executemany(
+            "INSERT OR IGNORE INTO news_articles "
+            "(id, ticker, created_at, headline, summary, source, symbols) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        added = cur.rowcount if cur.rowcount > 0 else len(rows)
         self._conn.commit()
         return added
 
@@ -152,15 +151,27 @@ class NewsCache:
             "VALUES (?, ?, ?)",
             (article_id, score, label),
         )
+    def set_sentiment_batch(self, items: list[tuple[int, float, str]]) -> None:
+        """Batch insert article sentiments in a single fast transaction."""
+        if not items:
+            return
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO article_sentiment (article_id, score, label) "
+            "VALUES (?, ?, ?)",
+            items,
+        )
         self._conn.commit()
 
     def set_daily(self, ticker: str, daily: dict[str, dict[str, Any]]) -> None:
-        for date, d in daily.items():
-            self._conn.execute(
-                "INSERT OR REPLACE INTO daily_sentiment "
-                "(ticker, date, score, label, article_count) VALUES (?, ?, ?, ?, ?)",
-                (ticker, date, d["score"], d["label"], d["article_count"]),
-            )
+        rows = [
+            (ticker, date, d["score"], d["label"], d["article_count"])
+            for date, d in daily.items()
+        ]
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO daily_sentiment "
+            "(ticker, date, score, label, article_count) VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
         self._conn.commit()
 
     def dated_scores(self, ticker: str) -> list[tuple[str, float]]:

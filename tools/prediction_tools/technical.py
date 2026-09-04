@@ -147,6 +147,26 @@ def _score_stochastic(stoch_dict: dict[str, Any]) -> float:
     return 0.0
 
 
+def _score_squeeze(squeeze_dict: dict[str, Any]) -> float:
+    """Score John Carter's TTM Squeeze for directional breakout momentum (-1.0 to +1.0)."""
+    sig = squeeze_dict.get("breakout_signal", "neutral")
+    slope = squeeze_dict.get("momentum_slope", "flat")
+    hist = float(squeeze_dict.get("momentum_hist", 0.0) or 0.0)
+
+    if sig == "bullish_breakout":
+        return 1.0
+    if sig == "bearish_breakout":
+        return -1.0
+    if sig == "bullish_expansion":
+        return 0.7 if slope == "increasing_bullish" else 0.4
+    if sig == "bearish_expansion":
+        return -0.7 if slope == "increasing_bearish" else -0.4
+    if sig == "consolidating":
+        # In a squeeze, early momentum drift can hint at breakout direction
+        return 0.2 if hist > 0 else (-0.2 if hist < 0 else 0.0)
+    return 0.0
+
+
 def calculate_technical_indicators(
     technical: dict[str, Any],
     tuning: TuningConfig | None = None,
@@ -172,6 +192,8 @@ def calculate_technical_indicators(
         adx_trend_direction: str
         bollinger_regime  : str
         obv_confirmation  : str
+        squeeze_signal    : str
+        iv_regime         : str
     """
     t = tuning or DEFAULT_TUNING
     weights = t.momentum_weights
@@ -181,6 +203,8 @@ def calculate_technical_indicators(
     bb_dict = technical.get("calculate_bollinger_bands") or {}
     obv_dict = technical.get("calculate_obv") or {}
     stoch_dict = technical.get("calculate_stochastic") or {}
+    squeeze_dict = technical.get("calculate_ttm_squeeze") or {}
+    iv_dict = technical.get("calculate_iv_rank") or {}
 
     rsi_score = _score_rsi(rsi_dict)
     macd_score = _score_macd(macd_dict)
@@ -188,11 +212,12 @@ def calculate_technical_indicators(
     bb_score = _score_bollinger(bb_dict)
     obv_score = _score_obv(obv_dict)
     stoch_score = _score_stochastic(stoch_dict)
+    squeeze_score = _score_squeeze(squeeze_dict)
 
     # Effective ADX weight = base_weight × strength_scale
-    effective_adx_weight = weights["adx"] * adx_scale
+    effective_adx_weight = weights.get("adx", 0.15) * adx_scale
     # Redistribute unused ADX weight proportionally to other indicators
-    dropped = weights["adx"] - effective_adx_weight
+    dropped = weights.get("adx", 0.15) - effective_adx_weight
     other_keys = [k for k in weights if k != "adx"]
     other_total = sum(weights[k] for k in other_keys)
     adjusted_weights: dict[str, float] = {}
@@ -212,8 +237,10 @@ def calculate_technical_indicators(
         "obv": obv_score,
         "stochastic": stoch_score,
     }
+    if "squeeze" in weights:
+        scores["squeeze"] = squeeze_score
 
-    raw = sum(adjusted_weights[k] * scores[k] for k in scores)
+    raw = sum(adjusted_weights.get(k, 0.0) * scores[k] for k in scores)
     momentum_score = max(-1.0, min(1.0, raw))
 
     if momentum_score > 0.15:
@@ -232,6 +259,8 @@ def calculate_technical_indicators(
         "adx_trend_direction": adx_dict.get("trend_direction", "ranging"),
         "bollinger_regime": bb_dict.get("volatility_regime", "normal"),
         "obv_confirmation": obv_dict.get("volume_confirmation", "moderate_confirmation"),
+        "squeeze_signal": squeeze_dict.get("breakout_signal", "neutral"),
+        "iv_regime": iv_dict.get("vol_regime", "fair_value"),
     }
 
 

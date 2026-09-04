@@ -1,5 +1,303 @@
 {
   "default": {
-    "equity_only": true
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.0328,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.4131,
+    "min_risk_reward": 0.8961,
+    "trade_horizon_days": 4,
+    "momentum_weights": {
+      "bollinger": 0.334,
+      "macd": 0.1967,
+      "stochastic": 0.1496,
+      "adx": 0.1382,
+      "rsi": 0.0841,
+      "squeeze": 0.0627,
+      "obv": 0.0348
+    },
+    "signal_weights": {
+      "news_sentiment": 0.3178,
+      "market_trend": 0.3071,
+      "historical_trend": 0.2686,
+      "prediction_signal": 0.0718,
+      "technical_summary": 0.0346
+    }
+  },
+  "tickers": {},
+  "Technology": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.022730060927690282,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.5657774372678462,
+    "min_risk_reward": 1.2556901799284275,
+    "trade_horizon_days": 4,
+    "momentum_weights": {
+      "macd": 0.34686,
+      "adx": 0.21547,
+      "rsi": 0.03023,
+      "bollinger": 0.0217,
+      "obv": 0.0322,
+      "stochastic": 0.02654,
+      "squeeze": 0.327
+    },
+    "signal_weights": {
+      "news_sentiment": 0.29393,
+      "technical_summary": 0.17509,
+      "historical_trend": 0.11984,
+      "prediction_signal": 0.14571,
+      "market_trend": 0.26543
+    }
+  },
+  "Financials": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.02746623174171106,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.4784220282572138,
+    "min_risk_reward": 0.8649851628895084,
+    "trade_horizon_days": 3,
+    "momentum_weights": {
+      "macd": 0.07659,
+      "adx": 0.15846,
+      "rsi": 0.30393,
+      "bollinger": 0.30631,
+      "obv": 0.05485,
+      "stochastic": 0.04808,
+      "squeeze": 0.05178
+    },
+    "signal_weights": {
+      "news_sentiment": 0.0736,
+      "technical_summary": 0.24656,
+      "historical_trend": 0.08784,
+      "prediction_signal": 0.29926,
+      "market_trend": 0.29274
+    }
+  },
+  "Consumer Discretionary": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.037719820279534584,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.5948172615262599,
+    "min_risk_reward": 1.5432414742641565,
+    "trade_horizon_days": 4,
+    "momentum_weights": {
+      "macd": 0.03943,
+      "adx": 0.0794,
+      "rsi": 0.16837,
+      "bollinger": 0.05131,
+      "obv": 0.32916,
+      "stochastic": 0.02513,
+      "squeeze": 0.30721
+    },
+    "signal_weights": {
+      "news_sentiment": 0.15761,
+      "technical_summary": 0.22349,
+      "historical_trend": 0.13355,
+      "prediction_signal": 0.21395,
+      "market_trend": 0.2714
+    }
+  },
+  "Energy": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.02784484609536767,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.40216817092296925,
+    "min_risk_reward": 1.408790309506061,
+    "trade_horizon_days": 4,
+    "momentum_weights": {
+      "macd": 0.07676,
+      "adx": 0.15663,
+      "rsi": 0.10939,
+      "bollinger": 0.11458,
+      "obv": 0.15001,
+      "stochastic": 0.14573,
+      "squeeze": 0.2469
+    },
+    "signal_weights": {
+      "news_sentiment": 0.38983,
+      "technical_summary": 0.05409,
+      "historical_trend": 0.42008,
+      "prediction_signal": 0.06758,
+      "market_trend": 0.06842
+    }
+  },
+  "Consumer Staples": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.026741722139252525,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.6081714335383799,
+    "min_risk_reward": 1.5185936389019754,
+    "trade_horizon_days": 5,
+    "momentum_weights": {
+      "macd": 0.21878,
+      "adx": 0.02106,
+      "rsi": 0.29409,
+      "bollinger": 0.25455,
+      "obv": 0.07621,
+      "stochastic": 0.06743,
+      "squeeze": 0.06788
+    },
+    "signal_weights": {
+      "news_sentiment": 0.09933,
+      "technical_summary": 0.09932,
+      "historical_trend": 0.05271,
+      "prediction_signal": 0.43741,
+      "market_trend": 0.31123
+    }
+  },
+  "Communication Services": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.03746347860796777,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.5631420310118741,
+    "min_risk_reward": 1.480923693526237,
+    "trade_horizon_days": 4,
+    "momentum_weights": {
+      "macd": 0.2092,
+      "adx": 0.14632,
+      "rsi": 0.01309,
+      "bollinger": 0.01777,
+      "obv": 0.20687,
+      "stochastic": 0.20892,
+      "squeeze": 0.19783
+    },
+    "signal_weights": {
+      "news_sentiment": 0.34429,
+      "technical_summary": 0.21524,
+      "historical_trend": 0.15918,
+      "prediction_signal": 0.02619,
+      "market_trend": 0.25511
+    }
+  },
+  "Healthcare": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.036383373358666704,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.40800786865360755,
+    "min_risk_reward": 1.308871817592913,
+    "trade_horizon_days": 3,
+    "momentum_weights": {
+      "macd": 0.17679,
+      "adx": 0.05077,
+      "rsi": 0.0775,
+      "bollinger": 0.16015,
+      "obv": 0.21582,
+      "stochastic": 0.11701,
+      "squeeze": 0.20197
+    },
+    "signal_weights": {
+      "news_sentiment": 0.07872,
+      "technical_summary": 0.11622,
+      "historical_trend": 0.36343,
+      "prediction_signal": 0.14034,
+      "market_trend": 0.30128
+    }
+  },
+  "Industrials": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.032426007670843165,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.5595717902250447,
+    "min_risk_reward": 1.280519669481987,
+    "trade_horizon_days": 5,
+    "momentum_weights": {
+      "macd": 0.13776,
+      "adx": 0.29252,
+      "rsi": 0.03229,
+      "bollinger": 0.04883,
+      "obv": 0.30927,
+      "stochastic": 0.1615,
+      "squeeze": 0.01783
+    },
+    "signal_weights": {
+      "news_sentiment": 0.29285,
+      "technical_summary": 0.28254,
+      "historical_trend": 0.13993,
+      "prediction_signal": 0.1044,
+      "market_trend": 0.18028
+    }
+  },
+  "Materials": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.03491766618967255,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.586328535909434,
+    "min_risk_reward": 1.2849111782530847,
+    "trade_horizon_days": 5,
+    "momentum_weights": {
+      "macd": 0.05003,
+      "adx": 0.20929,
+      "rsi": 0.12256,
+      "bollinger": 0.16194,
+      "obv": 0.2426,
+      "stochastic": 0.01952,
+      "squeeze": 0.19405
+    },
+    "signal_weights": {
+      "news_sentiment": 0.09832,
+      "technical_summary": 0.22271,
+      "historical_trend": 0.23454,
+      "prediction_signal": 0.20994,
+      "market_trend": 0.2345
+    }
+  },
+  "Utilities": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.037078723939690826,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.42568318524263654,
+    "min_risk_reward": 1.2857666213808099,
+    "trade_horizon_days": 5,
+    "momentum_weights": {
+      "macd": 0.10915,
+      "adx": 0.16629,
+      "rsi": 0.24559,
+      "bollinger": 0.1094,
+      "obv": 0.08527,
+      "stochastic": 0.17385,
+      "squeeze": 0.11044
+    },
+    "signal_weights": {
+      "news_sentiment": 0.1546,
+      "technical_summary": 0.21327,
+      "historical_trend": 0.0868,
+      "prediction_signal": 0.28496,
+      "market_trend": 0.26037
+    }
+  },
+  "Real Estate": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.02117092867373503,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.6077325289408,
+    "min_risk_reward": 1.7639136347282873,
+    "trade_horizon_days": 6,
+    "momentum_weights": {
+      "macd": 0.15386,
+      "adx": 0.02444,
+      "rsi": 0.27018,
+      "bollinger": 0.08747,
+      "obv": 0.20086,
+      "stochastic": 0.10233,
+      "squeeze": 0.16085
+    },
+    "signal_weights": {
+      "news_sentiment": 0.18686,
+      "technical_summary": 0.07862,
+      "historical_trend": 0.38542,
+      "prediction_signal": 0.25775,
+      "market_trend": 0.09136
+    }
   }
 }

@@ -44,6 +44,8 @@ from tools.historical.indicators import (
     calculate_moving_averages,
     calculate_obv,
     calculate_rsi,
+    calculate_ttm_squeeze,
+    calculate_iv_rank,
 )
 from tools.historical.levels import (
     identify_support_resistance,
@@ -155,6 +157,8 @@ def _hist_from_bars(bars: list[Any]) -> dict[str, Any]:
         "calculate_atr": calculate_atr(highs, lows, closes),
         "calculate_adx": calculate_adx(highs, lows, closes),
         "calculate_obv": calculate_obv(closes, volumes),
+        "calculate_ttm_squeeze": calculate_ttm_squeeze(highs, lows, closes),
+        "calculate_iv_rank": calculate_iv_rank(closes),
     }
     levels = identify_support_resistance(bar_dicts)
     trend = identify_trend(closes)
