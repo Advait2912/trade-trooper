@@ -6,9 +6,10 @@ Tabs:
   🔑 API       — enter Alpaca paper credentials
   🚀 Runner    — start/stop/restart the paper-trading loop
   📊 Live      — equity, drawdown, decisions, LLM narrative
-  📈 Backtest  — on-demand backtest + charts
-  🎯 Tuning    — per-industry weights viewer
+  📈 Backtest  — async date-range backtests + charts
+  🎯 Tuning    — tuning jobs, weights editor, checkpoints
   ⚙️ Settings  — risk profile, market clock, .env display
+  💬 Chat      — Ollama reasoning over decision traces
 """
 
 from __future__ import annotations
@@ -40,8 +41,8 @@ elif env.get("ALPACA_API_KEY"):
 else:
     status_pill("⚠ No API key yet — enter one in the API tab", "warning")
 
-tab_api, tab_runner, tab_live, tab_backtest, tab_tuning, tab_settings = st.tabs(
-    ["🔑 API", "🚀 Runner", "📊 Live", "📈 Backtest", "🎯 Tuning", "⚙️ Settings"]
+tab_api, tab_runner, tab_live, tab_backtest, tab_tuning, tab_settings, tab_chat = st.tabs(
+    ["🔑 API", "🚀 Runner", "📊 Live", "📈 Backtest", "🎯 Tuning", "⚙️ Settings", "💬 Chat"]
 )
 
 with tab_api:
@@ -75,3 +76,8 @@ with tab_settings:
     from web.ui.pages import settings as settings_page
 
     settings_page.render()
+
+with tab_chat:
+    from web.ui.pages import chat as chat_page
+
+    chat_page.render()

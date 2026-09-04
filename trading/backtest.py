@@ -257,10 +257,18 @@ def _check_exit(active: dict[str, Any], bar: Any) -> tuple[bool, bool, float, st
     return False, False, float(bar.close), "horizon"
 
 
-async def _fetch_bars(settings: Settings, ticker: str, days_back: int) -> list[Any]:
+async def _fetch_bars(
+    settings: Settings, ticker: str, days_back: int, end_date: Any | None = None
+) -> list[Any]:
     async with AlpacaClient(settings) as client:
         return await get_price_history(client, ticker, days_back=days_back,
-                                       interval="1d", feed=settings.alpaca_data_feed)
+                                       interval="1d", feed=settings.alpaca_data_feed,
+                                       end_date=end_date)
+
+
+def _bar_day(bar: Any) -> str:
+    """The YYYY-MM-DD date of a bar (ISO strings may carry time/offset)."""
+    return str(bar.date)[:10]
 
 
 async def run_backtest(
@@ -271,6 +279,8 @@ async def run_backtest(
     tuning: TuningConfig | None = None,
     bars: list[Any] | None = None,
     news_cache: NewsCache | None = None,
+    start_date: Any | None = None,
+    end_date: Any | None = None,
 ) -> dict[str, Any]:
     """Run a deterministic backtest and journal every cycle + simulated trade.
 
@@ -278,12 +288,18 @@ async def run_backtest(
     harness can sweep a grid without editing code.  ``bars`` may be supplied to
     skip the (network) fetch — used by the harness to reuse one fetch across
     many configs.  ``news_cache`` supplies per-day historical sentiment (FinBERT);
-    when absent the backtest is news-neutral.
+    when absent the backtest is news-neutral.  ``start_date``/``end_date`` clip
+    the *tradeable* window to an arbitrary historical range (indicator warm-up
+    still comes from bars before ``start_date``).
     """
     journal = journal or TradeJournal(str(data_path("backtest_journal.db")))
     days_back = _WARMUP + int(_DAY * max(1, months) / 12.0)
     if bars is None:
-        bars = await _fetch_bars(settings, ticker, days_back)
+        bars = await _fetch_bars(settings, ticker, days_back, end_date)
+
+    if end_date is not None:
+        end_iso = str(end_date)[:10]
+        bars = [b for b in bars if _bar_day(b) <= end_iso]
 
     daily_map = news_cache.load_daily_map(ticker) if news_cache is not None else {}
 
@@ -291,11 +307,23 @@ async def run_backtest(
         return {"summary": f"Insufficient history for {ticker} ({len(bars)} bars).",
                 "trades": 0, "journal": str(journal.path)}
 
+    if start_date is not None:
+        start_iso = str(start_date)[:10]
+        trade_start = next(
+            (i for i, b in enumerate(bars) if _bar_day(b) >= start_iso), None
+        )
+        if trade_start is None:
+            return {"summary": f"No bars after {start_iso} for {ticker}.",
+                    "trades": 0, "journal": str(journal.path)}
+        iter_start = max(trade_start, _WARMUP)
+    else:
+        iter_start = _WARMUP
+
     active: dict[str, Any] | None = None
     trades = 0
     entry_ts = ""
 
-    for i in range(_WARMUP, len(bars) - 1):
+    for i in range(iter_start, len(bars) - 1):
         window = bars[: i + 1]
         nxt = bars[i + 1]
         if active is None:

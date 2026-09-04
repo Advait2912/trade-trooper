@@ -69,11 +69,14 @@ async def get_price_history(
     interval: str = "1d",
     feed: str = "iex",
     end_date: date | None = None,
+    start_date: date | None = None,
 ) -> list[PriceBar]:
     """Retrieve historical OHLCV bars for a symbol.
 
     ``end_date`` overrides the "now" reference so a historical window (e.g. a
-    2024-only backtest) can be fetched; bars are returned ascending in time.
+    2024-only backtest) can be fetched; ``start_date`` sets the fetch start
+    explicitly (when omitted, ``end - days_back*2`` calendar days is used).
+    Bars are returned ascending in time.
 
     Raises ``KeyError`` for an unsupported interval.
     """
@@ -83,13 +86,17 @@ async def get_price_history(
             f"expected one of {sorted(INTERVAL_TIMEframe)}"
         )
     end = end_date or date.today()
+    if start_date is not None:
+        start = start_date
+    else:
+        start = end - timedelta(days=max(days_back * 2, 10))
     params = {
         "timeframe": INTERVAL_TIMEframe[interval],
         "limit": _limit_for(interval, days_back),
         "adjustment": "split",
         "feed": feed,
         "sort": "desc",
-        "start": (end - timedelta(days=max(days_back * 2, 10))).isoformat(),
+        "start": start.isoformat(),
         "end": end.isoformat(),
     }
     payload = await client.get_json(f"/v2/stocks/{symbol}/bars", params=params)

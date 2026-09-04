@@ -261,6 +261,38 @@ technical/prediction edge; the forward paper run adds the news effect.
 expectancy, average win/loss, max drawdown, decision distribution, a
 per-instrument breakdown and the latest equity snapshot.
 
+### Streamlit dashboard (`web/`)
+
+```bash
+streamlit run web/streamlit_app.py --server.port 8501
+```
+
+Tabs:
+
+- **🔑 API** — enter Alpaca paper credentials (written to `.env`).
+- **🚀 Runner** — start/stop/restart the paper loop; pick the universe by
+  **industry** then fine-tune tickers. Per-industry/stock weights from
+  `data/weights_db.json` are applied automatically per ticker.
+- **📊 Live** — equity, drawdown, recent decisions, LLM narrative.
+- **📈 Backtest** — run date-range backtests over **any start→end window** as
+  async jobs (other tabs keep working meanwhile). Renders KPIs, equity/P&L,
+  candlesticks with entry/exit markers, and a per-trade table with one-click
+  Ollama explanations of the decision trace.
+- **🎯 Tuning** — launch `optimize-industries`/`optimize-stocks` jobs with live
+  progress, review a finished job's weights and *Apply* them to the live DB
+  (auto-checkpoint first), edit any industry/ticker entry inline, and
+  snapshot/restore **checkpoints** under `data/checkpoints/`.
+- **⚙️ Settings** — risk profile quick-sets plus granular risk parameters
+  (sizing, gates, position limits, daily-loss/portfolio-drawdown caps) written
+  to `.env`.
+- **💬 Chat** — free-form chat with your local Ollama model, optionally
+  attaching a trade's decision trace (market/prediction/risk/decision +
+  realized outcome) for reasoning.
+
+Backtests and tuning run as **detached subprocess jobs** (`data/jobs/<id>/`),
+so you can backtest and tune at the same time. Tuning jobs write to a
+job-scoped weights file; nothing touches the live DB until you click Apply.
+
 ### Tuning harness
 
 Every numeric weight/threshold in Phases 2-4 lives in `tuning.py`

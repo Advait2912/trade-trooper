@@ -39,6 +39,7 @@ from tools.prediction_tools.technical import (
     calculate_technical_indicators,
 )
 from tools.prediction_tools.volatility_forecast import forecast_volatility
+from tuning import TuningConfig
 
 log = logging.getLogger("market_intel_agent.prediction_agent")
 

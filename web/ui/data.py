@@ -12,6 +12,7 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+import streamlit as st
 
 
 def repo_root() -> Path:
@@ -35,7 +36,11 @@ def cache_db() -> Path:
 
 
 def weights_db_path() -> Path:
-    return data_dir() / "weights_db_tuned_backup.json"
+    return data_dir() / "weights_db.json"
+
+
+def jobs_dir() -> Path:
+    return data_dir() / "jobs"
 
 
 def env_path() -> Path:
@@ -152,6 +157,81 @@ def load_weights_db() -> dict:
     if not weights_db_path().exists():
         return {}
     return json.loads(weights_db_path().read_text(encoding="utf-8"))
+
+
+def load_journal_trades(journal_path: Path) -> pd.DataFrame:
+    """Read the trades table from any TradeJournal SQLite file."""
+    if not journal_path.exists():
+        return pd.DataFrame()
+    try:
+        conn = sqlite3.connect(str(journal_path))
+        try:
+            return pd.read_sql_query(
+                "SELECT opened_ts, closed_ts, ticker, instrument, option_type, quantity, "
+                "entry_price, exit_price, pnl, pnl_pct, exit_reason FROM trades ORDER BY id",
+                conn,
+            )
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return pd.DataFrame()
+
+
+def load_journal_cycles(journal_path: Path) -> pd.DataFrame:
+    """Read the cycles table from any TradeJournal SQLite file."""
+    if not journal_path.exists():
+        return pd.DataFrame()
+    try:
+        conn = sqlite3.connect(str(journal_path))
+        try:
+            return pd.read_sql_query(
+                "SELECT ts, ticker, decision, composite_bias, confidence, snapshot, "
+                "industry, weights_hash FROM cycles ORDER BY id",
+                conn,
+            )
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_bars_df(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """Fetch OHLCV bars for a range (cached 10 min); empty df when no credentials."""
+    import asyncio
+    from datetime import date
+
+    from alpaca.client import AlpacaClient
+    from alpaca.historical import get_price_history
+    from utils.config import load_settings
+
+    settings = load_settings()
+    if not settings.has_alpaca_credentials:
+        return pd.DataFrame()
+
+    start_d = date.fromisoformat(start) if start else None
+    end_d = date.fromisoformat(end) if end else None
+
+    async def _fetch():
+        async with AlpacaClient(settings) as client:
+            return await get_price_history(
+                client, ticker, days_back=600, interval="1d",
+                feed=settings.alpaca_data_feed, end_date=end_d, start_date=start_d,
+            )
+
+    try:
+        bars = asyncio.run(_fetch())
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame()
+
+    df = pd.DataFrame([{k: getattr(b, k) for k in ("date", "open", "high", "low", "close", "volume")}
+                       for b in bars])
+    if df.empty:
+        return df
+    df["close"] = df["close"].astype(float)
+    df["sma20"] = df["close"].rolling(20).mean()
+    df["sma50"] = df["close"].rolling(50).mean()
+    return df
 
 
 # ---------------------------------------------------------------------------

@@ -1,77 +1,206 @@
-"""Backtest page — run on-demand backtests and visualize results."""
+"""Backtest page — date-range backtests as async jobs + rich charts.
+
+- Pick industries/tickers; the weights DB is shown per ticker.
+- Choose any start/end date range.
+- The run is a background subprocess (job), so other work continues.
+- Results (trades journal) are rendered as KPIs, charts and a trade table with
+  one-click Ollama explanations of each decision trace.
+"""
 
 from __future__ import annotations
 
-import subprocess
-import sys
+import json
 
+import pandas as pd
 import streamlit as st
 
-from web.ui import charts
-from web.ui.data import cache_db, load_cycles, load_trades, repo_root
+from web.ui import charts, jobs
+from web.ui.data import (
+    fetch_bars_df,
+    load_journal_cycles,
+    load_journal_trades,
+    venv_python,
+    weights_db_path,
+)
+from web.ui.job_widgets import jobs_auto_refresh, render_job
 from web.ui.theme import kpi_tile, section
+from web.ui.trace import chat_about_trade, decision_trace_text
+from weights_db import INDUSTRY_STOCKS, TICKER_NAMESPACE, load_weights_db, resolve_industry
 
 
-def _run_backtest(tickers: list[str], months: int) -> str:
-    cmd = [sys.executable, "-m", "scripts.tune", "evaluate",
-           "--universe", ",".join(tickers), "--months", str(months)]
-    if cache_db().exists():
-        cmd += ["--news-cache", str(cache_db())]
-    try:
-        result = subprocess.run(cmd, cwd=str(repo_root()), capture_output=True, text=True, timeout=900)
-        return result.stdout + result.stderr
-    except subprocess.TimeoutExpired:
-        return "Backtest timed out after 15 minutes."
+def _ticker_selection() -> list[str]:
+    industries = sorted(INDUSTRY_STOCKS)
+    all_tickers = sorted({t for ts in INDUSTRY_STOCKS.values() for t in ts})
+    cols = st.columns(4)
+    chosen_inds = []
+    for i, ind in enumerate(industries):
+        if cols[i % 4].checkbox(ind, value=ind in ("Technology", "Financials"), key=f"bt_ind_{ind}"):
+            chosen_inds.append(ind)
+    if chosen_inds:
+        defaults = sorted({t for ind in chosen_inds for t in INDUSTRY_STOCKS[ind]})
+    else:
+        defaults = []
+    tickers = st.multiselect("Tickers", all_tickers, default=defaults, key="bt_tickers")
+    return tickers
+
+
+def _config_preview(tickers: list[str]) -> None:
+    db = load_weights_db(weights_db_path())
+    if not db:
+        st.caption("weights_db.json not found — runs will use global defaults.")
+        return
+    rows = []
+    for t in tickers:
+        stock = (db.get(TICKER_NAMESPACE) or {}).get(t)
+        ind = resolve_industry(t)
+        rows.append({"ticker": t, "industry": ind, "override": f"stock*{t}" if stock else "—"})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
+def _launch_form() -> tuple[list[str], dict]:
+    section("📈", "Date-Range Backtest",
+            "Replays the deterministic Phase 2–4 chain over any historical window (news-aware when the cache exists).")
+
+    tickers = _ticker_selection()
+    col_start, col_end, col_w = st.columns([2, 2, 1])
+    with col_start:
+        start = st.date_input("Start date", key="bt_start_date")
+    with col_end:
+        end = st.date_input("End date", key="bt_end_date")
+    with col_w:
+        use_weights = st.checkbox("Use weights DB", value=True, key="bt_use_weights",
+                                  help="Resolve each ticker's industry/stock config from data/weights_db.json")
+    params = {"start": start.isoformat(), "end": end.isoformat(), "use_weights": use_weights}
+
+    if tickers:
+        _config_preview(tickers)
+
+    if st.button("▶ Run backtest", type="primary", disabled=not tickers):
+        if start >= end:
+            st.error("Start date must be before end date.")
+        else:
+            job_id = jobs.create("backtest", label=f"{len(tickers)} tickers {start}→{end}")
+            journal_path = jobs.job_artifact(job_id, "trades.db")
+            cmd = [venv_python(), "-m", "scripts.tune", "evaluate",
+                   "--universe", ",".join(tickers),
+                   "--start-date", start.isoformat(), "--end-date", end.isoformat(),
+                   "--journal", str(journal_path)]
+            cmd += ["--weights-db", str(weights_db_path()) if use_weights else ""]
+            jobs.launch(job_id, cmd)
+            st.success(f"Backtest job {job_id} launched.")
+            st.rerun()
+    return tickers, params
+
+
+def _render_results(job_id: str, params: dict) -> None:
+    journal_path = jobs.job_artifact(job_id, "trades.db")
+    if not journal_path.exists():
+        st.info("Job finished but produced no trades journal.")
+        return
+    trades = load_journal_trades(journal_path)
+    cycles = load_journal_cycles(journal_path)
+    if trades.empty:
+        st.info("No trades in this range — the strategy held through it.")
+        return
+
+    wins = trades[trades["pnl"] > 0]
+    losses = trades[trades["pnl"] <= 0]
+    gw = wins["pnl"].sum()
+    gl = abs(losses["pnl"].sum())
+    pf = gw / gl if gl > 0 else float("inf")
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for p in trades["pnl"]:
+        equity += p
+        peak = max(peak, equity)
+        max_dd = min(max_dd, equity - peak)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        kpi_tile("Trades", str(len(trades)))
+    with c2:
+        kpi_tile("Win rate", f"{len(wins) / len(trades) * 100:.1f}%")
+    with c3:
+        kpi_tile("Profit factor", f"{pf:.2f}" if pf != float("inf") else "∞")
+    with c4:
+        kpi_tile("Expectancy", f"${trades['pnl'].mean():,.2f}")
+    with c5:
+        kpi_tile("Max drawdown", f"${max_dd:,.0f}")
+
+    st.plotly_chart(charts.cumulative_pnl(trades), width="stretch")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.plotly_chart(charts.pnl_bar(trades), width="stretch")
+    with col_b:
+        st.plotly_chart(charts.win_by_weekday(trades), width="stretch")
+    st.plotly_chart(charts.pnl_by_instrument(trades), width="stretch")
+
+    st.subheader("Price + trades")
+    ticker = st.selectbox("Ticker for candles", sorted(trades["ticker"].unique()),
+                          key=f"candle_{job_id}")
+    bars = fetch_bars_df(ticker, params["start"], params["end"])
+    if bars.empty:
+        st.info("No bar data fetched (check API credentials).")
+    else:
+        t_ticker = trades[trades["ticker"] == ticker]
+        st.plotly_chart(charts.candlestick_chart(bars, t_ticker, f"{ticker} — entries/exits"),
+                        width="stretch")
+        st.plotly_chart(charts.volume_chart(bars), width="stretch")
+
+    st.subheader("Trades")
+    view = trades.sort_values("closed_ts", ascending=False)
+    cols = ["closed_ts", "ticker", "instrument", "entry_price", "exit_price", "pnl",
+            "pnl_pct", "exit_reason"]
+    st.dataframe(view[cols].head(50), width="stretch")
+
+    _explain_trades(view, cycles, job_id)
+
+
+def _explain_trades(trades: pd.DataFrame, cycles: pd.DataFrame, job_id: str) -> None:
+    if cycles.empty:
+        return
+    with st.expander("💬 Explain a trade (Ollama reasoning over the decision trace)"):
+        options = trades.apply(
+            lambda r: f"{r['ticker']}  {r['opened_ts'][:10]}  pnl=${r['pnl']:.0f}", axis=1
+        ).tolist()
+        choice = st.selectbox("Trade", options, key=f"explain_sel_{job_id}")
+        row = trades.iloc[options.index(choice)]
+        ticker = row["ticker"]
+        opened = row["opened_ts"]
+        sub = cycles[cycles["ticker"] == ticker]
+        snapshot = {}
+        if not sub.empty:
+            sub = sub.copy()
+            sub["ts"] = pd.to_datetime(sub["ts"])
+            target = pd.to_datetime(opened)
+            sub["dist"] = (sub["ts"] - target).abs()
+            best = sub.loc[sub["dist"].idxmin()]
+            try:
+                snapshot = json.loads(best["snapshot"])
+            except (ValueError, TypeError):
+                snapshot = {}
+        question = st.text_input(
+            "Ask about this trade",
+            value="Explain what happened and whether the decision was sound.",
+            key=f"explain_q_{job_id}")
+        if st.button("Run", type="primary", key=f"explain_run_{job_id}"):
+            with st.spinner("Reasoning over the decision trace…"):
+                trace = decision_trace_text(snapshot, row.to_dict())
+                reply = chat_about_trade(trace, question)
+            st.markdown(reply)
+            with st.expander("Decision trace"):
+                st.code(trace)
 
 
 def render() -> None:
-    section("📈", "Backtest & Tuning Evaluation",
-            "Replays the deterministic Phase 2–4 chain over historical bars (news-aware when the cache exists).")
-
-    from weights_db import INDUSTRY_STOCKS
-
-    options = sorted({t for ts in INDUSTRY_STOCKS.values() for t in ts})
-    tickers = st.multiselect("Tickers", options=options, default=["NVDA", "AAPL", "JPM", "XOM"])
-    months = st.slider("Months of history", 3, 24, 12, step=3)
-
-    if st.button("▶ Run backtest", type="primary"):
-        if not tickers:
-            st.error("Select at least one ticker.")
-        else:
-            with st.spinner("Running backtest — this can take a few minutes..."):
-                output = _run_backtest(tickers, months)
-            st.text(output[-4000:])
-
+    tickers, params = _launch_form()
     st.divider()
-    trades = load_trades()
-    cycles = load_cycles()
-
-    if not trades.empty:
-        col1, col2, col3, col4 = st.columns(4)
-        wins = trades[trades["pnl"] > 0]
-        losses = trades[trades["pnl"] <= 0]
-        gross_win = wins["pnl"].sum()
-        gross_loss = abs(losses["pnl"].sum())
-        pf = gross_win / gross_loss if gross_loss > 0 else float("inf")
-        with col1:
-            kpi_tile("Win rate", f"{len(wins) / len(trades) * 100:.1f}%")
-        with col2:
-            kpi_tile("Profit factor", f"{pf:.2f}" if pf != float("inf") else "∞")
-        with col3:
-            kpi_tile("Expectancy", f"${trades['pnl'].mean():,.2f}")
-        with col4:
-            kpi_tile("Max drawdown", f"${trades['pnl'].cumsum().min():,.0f}")
-
-        st.plotly_chart(charts.cumulative_pnl(trades), width="stretch")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.plotly_chart(charts.pnl_bar(trades), width="stretch")
-        with col_b:
-            st.plotly_chart(charts.winloss_heatmap(trades), width="stretch")
-
-        st.dataframe(trades.sort_values("closed_ts", ascending=False).head(50), width="stretch")
-    else:
-        st.info("No trades recorded yet — run the backtest above or let the paper loop trade.")
-
-    if not cycles.empty:
-        st.plotly_chart(charts.decision_donut(cycles), width="stretch")
+    section("🧪", "Backtest Jobs", "Runs asynchronously — you can tune or run other backtests meanwhile.")
+    for job in jobs.list_jobs("backtest")[:6]:
+        render_job(job)
+        if job.get("status") == "done":
+            _render_results(job["id"], params)
+        st.divider()
+    jobs_auto_refresh()

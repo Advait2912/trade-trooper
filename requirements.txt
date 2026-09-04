@@ -8,6 +8,10 @@ quantstats>=0.0.81
 hurst==0.0.5
 tzdata>=2024.1
 
+# Streamlit dashboard (web/)
+streamlit>=1.36
+plotly>=5.20
+
 # Development / testing
 pytest>=8.0
 pytest-asyncio>=0.23

@@ -231,3 +231,92 @@ def equity_vs_pnl(equity: pd.DataFrame, trades: pd.DataFrame) -> go.Figure:
                                  line={"color": PALETTE["accent"], "width": 2}))
     fig.update_layout(xaxis_title="Time", yaxis_title="$")
     return fig
+
+
+def candlestick_chart(
+    bars: pd.DataFrame,
+    trades: pd.DataFrame | None = None,
+    title: str = "Price (candles)",
+) -> go.Figure:
+    """OHLC candles with SMA overlays and entry/exit trade markers."""
+    fig = _base_layout(title, height=480)
+    if bars.empty:
+        return fig
+    fig.add_trace(
+        go.Candlestick(
+            x=bars["date"], open=bars["open"], high=bars["high"],
+            low=bars["low"], close=bars["close"], name="OHLC",
+            increasing_line_color=PALETTE["success"],
+            decreasing_line_color=PALETTE["danger"],
+        )
+    )
+    for col, name, color in (("sma20", "SMA20", PALETTE["warning"]),
+                             ("sma50", "SMA50", PALETTE["accent"])):
+        if col in bars and bars[col].notna().any():
+            fig.add_trace(go.Scatter(x=bars["date"], y=bars[col], name=name,
+                                     line={"color": color, "width": 1.2}))
+
+    if trades is not None and not trades.empty:
+        entries = trades[trades["entry_price"] > 0]
+        if not entries.empty:
+            fig.add_trace(go.Scatter(
+                x=entries["opened_ts"], y=entries["entry_price"], mode="markers",
+                name="Entry", marker={"symbol": "triangle-up", "color": PALETTE["success"], "size": 9},
+            ))
+        exits = trades[trades["exit_price"] > 0]
+        if not exits.empty:
+            colors = [PALETTE["success"] if p > 0 else PALETTE["danger"] for p in exits["pnl"]]
+            fig.add_trace(go.Scatter(
+                x=exits["closed_ts"], y=exits["exit_price"], mode="markers",
+                name="Exit", marker={"symbol": "triangle-down", "color": colors, "size": 9},
+            ))
+    fig.update_layout(xaxis_rangeslider_visible=False,
+                      xaxis_title="Date", yaxis_title="Price ($)")
+    return fig
+
+
+def volume_chart(bars: pd.DataFrame, title: str = "Volume") -> go.Figure:
+    fig = _base_layout(title, height=200)
+    if bars.empty:
+        return fig
+    colors = [PALETTE["success"] if c >= o else PALETTE["danger"]
+              for o, c in zip(bars["open"], bars["close"])]
+    fig.add_trace(go.Bar(x=bars["date"], y=bars["volume"], marker_color=colors))
+    fig.update_layout(xaxis_title="Date", yaxis_title="Volume", showlegend=False)
+    return fig
+
+
+def pnl_by_instrument(trades: pd.DataFrame) -> go.Figure:
+    fig = _base_layout("P&L by Instrument", height=320)
+    if trades.empty:
+        return fig
+    t = trades.copy()
+    t["label"] = t.apply(
+        lambda r: f"{r['instrument']}({r['option_type']})" if r["instrument"] == "option" else r["instrument"],
+        axis=1,
+    )
+    grouped = t.groupby("label")["pnl"].sum().sort_values()
+    fig.add_trace(go.Bar(x=grouped.index, y=grouped.values,
+                         marker_color=[PALETTE["danger"] if v < 0 else PALETTE["success"] for v in grouped.values]))
+    fig.update_layout(xaxis_title="Instrument", yaxis_title="P&L ($)")
+    return fig
+
+
+def win_by_weekday(trades: pd.DataFrame) -> go.Figure:
+    fig = _base_layout("Win Rate by Close Weekday", height=320)
+    if trades.empty:
+        return fig
+    t = trades.copy()
+    t["wd"] = pd.to_datetime(t["closed_ts"]).dt.day_name()
+    agg = t.groupby("wd").apply(
+        lambda g: pd.Series({"win_rate": (g["pnl"] > 0).mean() * 100, "n": len(g)}), include_groups=False
+    ).reset_index()
+    order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    agg["wd"] = pd.Categorical(agg["wd"], categories=order, ordered=True)
+    agg = agg.sort_values("wd").dropna()
+    fig.add_trace(go.Bar(x=agg["wd"], y=agg["win_rate"],
+                         marker_color=PALETTE["accent"],
+                         customdata=agg["n"],
+                         hovertemplate="%{x}<br>Win rate %{y:.1f}% (%{customdata} trades)<extra></extra>"))
+    fig.update_layout(xaxis_title="Weekday", yaxis_title="Win rate (%)")
+    return fig

@@ -34,11 +34,21 @@ def _runner_controls() -> None:
 
     all_tickers = sorted({t for ts in INDUSTRY_STOCKS.values() for t in ts})
     current = rs["universe"] or DEFAULT_UNIVERSE
+
+    ind_cols = st.columns(4)
+    chosen = []
+    for i, ind in enumerate(sorted(INDUSTRY_STOCKS)):
+        if ind_cols[i % 4].checkbox(ind, key=f"run_ind_{ind}"):
+            chosen.append(ind)
+    defaults = sorted({t for ind in chosen for t in INDUSTRY_STOCKS[ind]}) if chosen else \
+        [t for t in current if t in all_tickers]
+
     selected = st.multiselect(
         "Universe (tickers the agent trades)",
         options=all_tickers,
-        default=[t for t in current if t in all_tickers],
-        help="Change the set of stocks the runner analyses and trades. Applies on restart.",
+        default=defaults,
+        help="Pick by industry above, then fine-tune here. Industry/stock weights from "
+             "data/weights_db.json are applied automatically per ticker.",
     )
 
     col1, col2, col3 = st.columns(3)
@@ -79,6 +89,69 @@ def _risk_profile() -> None:
         }
         write_env(patch)
         st.success(f"Profile '{profile}' written to .env — next cycle picks it up.")
+
+    st.divider()
+    _risk_params()
+
+
+def _risk_params() -> None:
+    section("🔧", "Granular Risk Parameters",
+            "Fine-grained sizing / gates / limits written to .env.")
+    env = read_env()
+
+    def num(key: str, default: float, fmt="%.3f") -> float:
+        try:
+            return float(env.get(key, ""))
+        except ValueError:
+            return default
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        risk_pct = st.number_input("Risk per trade (%)", 0.0, 10.0,
+                                   num("RISK_PER_TRADE_PCT", 0.01) * 100, 0.1,
+                                   help="Fraction of capital risked per trade")
+        max_pos = st.number_input("Max position (%)", 0.0, 100.0,
+                                  num("MAX_POSITION_PCT", 0.05) * 100, 1.0)
+        min_conf = st.number_input("Min confidence", 0.0, 0.95,
+                                   num("MIN_CONFIDENCE", 0.35), 0.01)
+    with c2:
+        max_open = st.number_input("Max open positions (portfolio)", 1, 20,
+                                   int(num("MAX_OPEN_POSITIONS", 3, "%.0f")))
+        max_open_t = st.number_input("Max open positions / ticker", 1, 10,
+                                     int(num("MAX_OPEN_POSITIONS_PER_TICKER", 1, "%.0f")))
+        min_rr = st.number_input("Min reward/risk", 0.0, 3.0,
+                                 num("MIN_RISK_REWARD", 1.0), 0.05)
+    with c3:
+        daily_loss = st.number_input("Daily loss limit (%)", 0.0, 20.0,
+                                     num("DAILY_LOSS_LIMIT_PCT", 0.02) * 100, 0.5)
+        dd_cap = st.number_input("Max portfolio drawdown (%)", 0.0, 50.0,
+                                 num("MAX_PORTFOLIO_DRAWDOWN_PCT", 0.10) * 100, 1.0)
+        horizon = st.number_input("Trade horizon (days)", 1, 30,
+                                  int(num("TRADE_HORIZON_DAYS", 5, "%.0f")))
+
+    c1b, c2b = st.columns(2)
+    with c1b:
+        interval = st.number_input("Cycle interval (min)", 1, 240,
+                                   int(num("TRADING_INTERVAL_MIN", 30, "%.0f")))
+    with c2b:
+        order_type = st.selectbox("Order type", ["limit", "market"],
+                                  index=0 if env.get("ORDER_TYPE", "limit") == "limit" else 1)
+
+    if st.button("💾 Save risk parameters", type="primary"):
+        write_env({
+            "RISK_PER_TRADE_PCT": f"{risk_pct / 100:.4f}",
+            "MAX_POSITION_PCT": f"{max_pos / 100:.4f}",
+            "MIN_CONFIDENCE": f"{min_conf:.2f}",
+            "MIN_RISK_REWARD": f"{min_rr:.2f}",
+            "MAX_OPEN_POSITIONS": str(int(max_open)),
+            "MAX_OPEN_POSITIONS_PER_TICKER": str(int(max_open_t)),
+            "DAILY_LOSS_LIMIT_PCT": f"{daily_loss / 100:.4f}",
+            "MAX_PORTFOLIO_DRAWDOWN_PCT": f"{dd_cap / 100:.4f}",
+            "TRADE_HORIZON_DAYS": str(int(horizon)),
+            "TRADING_INTERVAL_MIN": str(int(interval)),
+            "ORDER_TYPE": order_type,
+        })
+        st.success("Risk parameters written to .env — applied on the next cycle.")
 
 
 def _market_status() -> None:

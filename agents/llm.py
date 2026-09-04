@@ -95,6 +95,44 @@ class OllamaClient:
             response_model=FinalSynthesis,
         )
 
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        system: str | None = None,
+        temperature: float = 0.2,
+    ) -> str:
+        """Free-form chat completion (no structured-output schema).
+
+        ``messages`` is a list of ``{"role": ..., "content": ...}`` dicts
+        (roles: system/user/assistant).  Returns the assistant text.
+        """
+        if self._client is None:
+            raise OllamaError("OllamaClient used outside of async context manager.")
+
+        msgs: list[dict[str, str]] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.extend(messages)
+
+        payload: dict[str, Any] = {
+            "model": self._settings.ollama_model,
+            "messages": msgs,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        try:
+            resp = await self._client.post(self._chat_url, json=payload)
+        except httpx.HTTPError as exc:
+            raise OllamaUnavailableError(
+                f"Could not reach Ollama at {self._chat_url}: {exc}"
+            ) from exc
+        if resp.status_code >= 400:
+            raise OllamaError(f"Ollama error {resp.status_code}: {resp.text[:300]}")
+        content = resp.json().get("message", {}).get("content", "")
+        if not content:
+            raise OllamaError("Empty model output.")
+        return content
+
     # ------------------------------------------------------------------
     # Low-level completion with validation + repair
     # ------------------------------------------------------------------

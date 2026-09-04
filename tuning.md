@@ -53,25 +53,27 @@ python scripts/tune.py evaluate --weights-db data/weights_db.json \
 ```
 
 `--set key=v` fixes a key; `--config overrides.json` loads a whole dict.
-`--news-cache` makes the backtest news-aware (see below).
+`--news-cache` makes the backtest news-aware (see below). To persist every
+simulated trade to a SQLite journal for the dashboard, pass `--journal <path>`.
 
-**Historical train/test splits**: every command accepts `--end-date YYYY-MM-DD`,
-which re-anchors the backtest window to that date instead of today. Tune on a
-past window and then evaluate on a later one to measure out-of-sample
-generalization:
+**Historical train/test splits**: `--start-date` / `--end-date` clip the
+*tradeable* window to an arbitrary range (indicator warm-up still comes from
+bars fetched before the start). Use either:
 
 ```bash
-# train: last 6 months of 2024
+# exact window: any start -> end
+python scripts/tune.py evaluate --weights-db data/weights_db.json \
+    --universe NVDA --start-date 2024-01-01 --end-date 2024-12-31 --journal data/out/trades.db
+
+# end-date only: trailing N months ending at a date
 python scripts/tune.py optimize-stocks --weights-db data/weights_db.json \
-    --tickers NVDA --months 6 --end-date 2024-12-31 --n-trials 50 --news-cache data/news_cache.db
-# test: calendar 2025 with the trained config
-python scripts/tune.py evaluate --weights-db data/weights_db.json --universe NVDA \
-    --months 12 --end-date 2025-12-31 --news-cache data/news_cache.db
+    --tickers NVDA --months 6 --end-date 2024-12-31 --n-trials 50
 ```
 
-The fetched bar history always includes the ~1-year indicator warm-up before
-the tradeable window, so a backtest needs news coverage over the window's own
-dates to be news-aware.
+Tune on a past window and evaluate on a later one to measure out-of-sample
+generalization. The fetched history always includes the ~1-year indicator
+warm-up, so a backtest needs news coverage over the window's own dates to be
+news-aware.
 
 ### `sweep` — grid-search a few knobs
 
@@ -126,6 +128,22 @@ default to 30) — pass a higher value if your ticker produces more trades.
 Stock-specific configs **override** the industry config for that ticker, so use
 them sparingly for names that genuinely diverge from their sector.
 
+### Checkpoints
+
+`weights_db.py` snapshots the live DB into `data/checkpoints/`
+(`weights_db_<ts>_<label>.json`):
+
+```python
+from weights_db import snapshot_weights_db, list_checkpoints, restore_checkpoint, delete_checkpoint
+snapshot_weights_db("data/weights_db.json", label="before_apply")  # -> Path
+list_checkpoints()      # newest first
+restore_checkpoint(path, "data/weights_db.json")
+delete_checkpoint(path)
+```
+
+The dashboard's Tuning tab wraps these: snapshot/restore/delete, and applying a
+tuned job's weights automatically snapshots the DB first (undo-safe).
+
 ## The industry weights DB
 
 `weights_db.py` maps tickers to industries and stores one tuned config per
@@ -169,6 +187,17 @@ applied per ticker with fresh `Settings`/`TuningConfig` instances, so each
 ticker runs the backtest with its own gates, horizon, and weights. `evaluate`
 annotates a ticker with `*` (e.g. `NVDA [Technology]*`) when a stock-specific
 override is active.
+
+### Live trading uses the weights DB too
+
+The live pipeline (`orchestrator/pipeline.py`) resolves the same config for
+each ticker: it loads `data/weights_db.json`, clones the base `Settings`, and
+passes the resolved `TuningConfig` into the Prediction/Risk/Decision agents
+(`PredictionAgent.run`, `RiskAgent.run`, `DecisionAgent.run` all accept a
+`tuning` argument). So `main.py NVDA --trade` and the paper runner apply each
+ticker's industry/stock weights, gates and horizon automatically — no extra
+flag needed. Each journaled cycle records the resolved `industry` and a
+`weights_hash` for auditability.
 
 ### The industry table
 
