@@ -45,11 +45,16 @@ def _pick_trade_context() -> None:
                 snapshot = json.loads(best["snapshot"])
             except (ValueError, TypeError):
                 snapshot = {}
-    trace = decision_trace_text(snapshot, row.to_dict())
+    include_logs = st.checkbox("Include recent execution logs in context", value=True)
+    logs = None
+    if include_logs:
+        from web.ui.runner_control import status as runner_status
+        logs = runner_status().get("last_log_lines") or []
+    trace = decision_trace_text(snapshot, row.to_dict(), logs=logs)
     if st.button("📎 Attach trace to next message"):
         st.session_state["chat_messages"].append(
             {"role": "user",
-             "content": f"Here is a decision trace:\n{trace}\n\nPlease analyze it."}
+             "content": f"Here is a decision trace with execution context:\n{trace}\n\nPlease analyze it and explain the decision and logs."}
         )
         st.rerun()
 

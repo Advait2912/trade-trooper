@@ -32,7 +32,11 @@ def _pick(snapshot: dict, *path: str, default=""):
     return str(cur)
 
 
-def decision_trace_text(snapshot: dict, trade: dict | None = None) -> str:
+def decision_trace_text(
+    snapshot: dict,
+    trade: dict | None = None,
+    logs: list[str] | str | None = None,
+) -> str:
     """Compact, human-readable decision trace from a cycle snapshot."""
     lines = ["=== DECISION TRACE ==="]
     lines.append(f"Ticker: {_pick(snapshot, 'ticker') or _pick(snapshot, 'historical', 'symbol')}")
@@ -77,6 +81,15 @@ def decision_trace_text(snapshot: dict, trade: dict | None = None) -> str:
         lines.append(f"  entry ${trade.get('entry_price', '?')}  exit ${trade.get('exit_price', '?')}  "
                      f"pnl ${trade.get('pnl', '?')} ({trade.get('pnl_pct', '?')})")
         lines.append(f"  exit_reason: {trade.get('exit_reason', '?')}")
+
+    if logs:
+        lines.append("")
+        lines.append("-- Execution Logs --")
+        if isinstance(logs, list):
+            lines.append("\n".join(logs[-30:]))
+        else:
+            lines.append(str(logs)[-2500:])
+
     return "\n".join(lines)
 
 
@@ -108,5 +121,57 @@ def chat_about_trade(
         return f"⚠ Chat failed: {exc}"
 
 
+def generate_backtest_analysis(
+    kpis: dict,
+    trades: any,
+    params: dict,
+    logs: list[str] | str | None = None,
+    question: str = "Analyze this backtest run, summarizing performance metrics, key drivers, top trade outcomes, and what the execution logs reveal.",
+) -> str:
+    """Run Ollama reasoning over the full backtest performance + execution logs."""
+    lines = ["=== BACKTEST RESULTS & EXECUTION LOGS ==="]
+    lines.append(f"Parameters: start={params.get('start')} end={params.get('end')} weights_db={params.get('use_weights')}")
+    lines.append(f"Trades Count: {kpis.get('trades_count')}")
+    lines.append(f"Win Rate: {kpis.get('win_rate')}")
+    lines.append(f"Profit Factor: {kpis.get('profit_factor')}")
+    lines.append(f"Expectancy: {kpis.get('expectancy')}")
+    lines.append(f"Max Drawdown: {kpis.get('max_drawdown')}")
+    lines.append(f"Total P&L: ${kpis.get('total_pnl', 0):,.2f}")
+
+    if hasattr(trades, "empty") and not trades.empty:
+        lines.append("")
+        lines.append("-- Top Winning Trades --")
+        winners = trades.sort_values("pnl", ascending=False).head(3)
+        for _, r in winners.iterrows():
+            lines.append(f"  {r['ticker']} {r.get('instrument', 'option')} PnL: ${r['pnl']:.2f} ({r.get('pnl_pct', 0):.1f}%) exit={r.get('exit_reason', '')}")
+
+        lines.append("-- Top Losing Trades --")
+        losers = trades.sort_values("pnl", ascending=True).head(3)
+        for _, r in losers.iterrows():
+            lines.append(f"  {r['ticker']} {r.get('instrument', 'option')} PnL: ${r['pnl']:.2f} ({r.get('pnl_pct', 0):.1f}%) exit={r.get('exit_reason', '')}")
+
+    if logs:
+        lines.append("")
+        lines.append("-- Execution Logs (Tail) --")
+        if isinstance(logs, list):
+            lines.append("\n".join(logs[-40:]))
+        else:
+            lines.append(str(logs)[-3000:])
+
+    context = "\n".join(lines)
+    return chat_about_trade(context, question=question)
+
+
+def generate_live_narrative(
+    snapshot: dict,
+    logs: list[str] | str | None = None,
+    question: str = "Explain the current market state, autonomous decision, risk parameters, and recent execution logs.",
+) -> str:
+    """Run Ollama synthesis over the live state + runner logs."""
+    trace = decision_trace_text(snapshot, logs=logs)
+    return chat_about_trade(trace, question=question)
+
+
 def user_message(text: str) -> str:
     return text
+

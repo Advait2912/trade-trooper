@@ -88,6 +88,18 @@ def render() -> None:
         else:
             st.info("LLM synthesis disabled or not yet run.")
 
+        if snap:
+            if st.button("🧠 Generate Live Analysis", key="live_gen_ai_btn"):
+                with st.spinner("Synthesizing decision & runner logs with Ollama…"):
+                    from web.ui.runner_control import status as runner_status
+                    from web.ui.trace import generate_live_narrative
+                    rs = runner_status()
+                    logs = rs.get("last_log_lines") or []
+                    reply = generate_live_narrative(snap, logs=logs)
+                    st.session_state["live_ai_narrative"] = reply
+            if "live_ai_narrative" in st.session_state:
+                st.markdown(st.session_state["live_ai_narrative"])
+
     if not cycles.empty:
         st.plotly_chart(charts.risk_score_timeline(cycles), width="stretch")
 
