@@ -95,16 +95,39 @@ streamlit run web/streamlit_app.py --server.port 8501
 
 ---
 
-## 6. Quickstart
-
 ## 6. How to Run Trade-Trooper
 
-### Prerequisites
+### ⚡ 1-Command Docker Deployment (Recommended)
+
+Get the entire production stack (FinBERT NLP microservice, Streamlit Command Center UI, and Autonomous Options Trader) running in seconds:
+
+```bash
+# Clone the repository
+git clone https://github.com/Advait2912/trade-trooper.git
+cd trade-trooper
+
+# (Optional) Add your Alpaca keys to .env.docker or configure directly in the UI
+# cp .env.docker.example .env.docker
+
+# Launch the full stack
+docker compose up -d
+```
+
+Open **`http://localhost:8501`** in your browser to access the Streamlit Command Center.
+- **Port 8501:** Streamlit Dashboard & Explainable AI
+- **Port 8000:** FinBERT Financial NLP Sentiment Microservice
+- **Background Container:** Multi-ticker autonomous defined-risk options runner
+
+---
+
+### Local Python Setup
+
+#### Prerequisites
 - **Python:** 3.10, 3.11, or 3.12
 - **Alpaca Brokerage:** Free paper trading account ([alpaca.markets](https://alpaca.markets))
-- **Optional:** Docker & Docker Compose (for containerized stack), Ollama (for offline LLM audit logs)
+- **Optional:** Local Ollama (e.g., `ollama run mistral`) for offline explainable AI narratives
 
-### 1. Environment Setup
+#### 1. Environment Setup
 ```bash
 # Clone the repository
 git clone https://github.com/Advait2912/trade-trooper.git

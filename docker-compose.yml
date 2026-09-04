@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   finbert:
     build:
@@ -16,22 +14,52 @@ services:
       retries: 5
       start_period: 20s
 
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trade-dashboard
+    command: streamlit run web/streamlit_app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env.docker
+    environment:
+      - FINBERT_URL=http://finbert:8000
+      - OPTIONS_ONLY=true
+      - EQUITY_ONLY=false
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      finbert:
+        condition: service_healthy
+    restart: unless-stopped
+
   trader:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: trade-portfolio
     command: python main.py --universe NVDA,AAPL,MSFT,AMD,JPM,BAC,V,GS,TSLA,XOM,KO --trade
-    env_file: .env.docker
+    env_file:
+      - .env.docker
     environment:
       - FINBERT_URL=http://finbert:8000
       - ENABLE_WEB_RESEARCH=false
       - ENABLE_LLM_SYNTHESIS=false
       - TRADING_ENABLED=true
+      - OPTIONS_ONLY=true
+      - EQUITY_ONLY=false
       - TRADING_INTERVAL_MIN=5
       - MAX_OPEN_POSITIONS=5
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
     volumes:
       - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       finbert:
         condition: service_healthy
