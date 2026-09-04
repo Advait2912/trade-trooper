@@ -91,10 +91,9 @@ def render() -> None:
         if snap:
             if st.button("🧠 Generate Live Analysis", key="live_gen_ai_btn"):
                 with st.spinner("Synthesizing decision & runner logs with Ollama…"):
-                    from web.ui.runner_control import status as runner_status
                     from web.ui.trace import generate_live_narrative
-                    rs = runner_status()
-                    logs = rs.get("last_log_lines") or []
+                    rs_curr = runner_status()
+                    logs = rs_curr.get("last_log_lines") or []
                     reply = generate_live_narrative(snap, logs=logs)
                     st.session_state["live_ai_narrative"] = reply
             if "live_ai_narrative" in st.session_state:

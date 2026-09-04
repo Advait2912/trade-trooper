@@ -13,5 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run unified portfolio trader across the 11 tickers
+# Expose Streamlit dashboard port
+EXPOSE 8501
+
+# Default command runs unified portfolio trader across the 11 tickers
 CMD ["python", "main.py", "--universe", "NVDA,AAPL,MSFT,AMD,JPM,BAC,V,GS,TSLA,XOM,KO", "--trade"]

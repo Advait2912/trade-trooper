@@ -12,6 +12,7 @@ import json
 import streamlit as st
 
 from web.ui.data import load_cycles, load_trades
+from web.ui.runner_control import status as runner_status
 from web.ui.theme import section
 from web.ui.trace import chat_about_trade, decision_trace_text
 
@@ -48,7 +49,6 @@ def _pick_trade_context() -> None:
     include_logs = st.checkbox("Include recent execution logs in context", value=True)
     logs = None
     if include_logs:
-        from web.ui.runner_control import status as runner_status
         logs = runner_status().get("last_log_lines") or []
     trace = decision_trace_text(snapshot, row.to_dict(), logs=logs)
     if st.button("📎 Attach trace to next message"):
