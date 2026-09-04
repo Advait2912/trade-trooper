@@ -165,9 +165,14 @@ class TestCalculatePositionSize:
         assert len(result["errors"]) > 0
 
     def test_invalid_stop(self):
+        # A stop above entry must NOT silently zero the position: the tool
+        # falls back to a hard 2% stop and sizes against it (capped at 5%).
         result = calculate_position_size(100_000, 0.01, 150.0, 160.0)
-        assert result["equity_shares"] == 0.0
-        assert len(result["errors"]) > 0
+        assert result["equity_shares"] > 0.0
+        assert result["equity_shares"] == pytest.approx(
+            (100_000 * 0.05) / 150.0, rel=0.01  # 5% position cap
+        )
+        assert any("2% of entry" in e for e in result["errors"])
 
 
 # ===========================================================================

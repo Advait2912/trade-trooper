@@ -1,0 +1,65 @@
+{
+  "Materials": {
+    "equity_only": false,
+    "min_confidence": 0.568864821394187,
+    "min_risk_reward": 2.0684265207823387,
+    "momentum_weights": {
+      "adx": 0.003718,
+      "bollinger": 0.081618,
+      "macd": 0.397925,
+      "obv": 0.325676,
+      "rsi": 0.111705,
+      "stochastic": 0.079357
+    },
+    "signal_weights": {
+      "historical_trend": 0.075501,
+      "market_trend": 0.220814,
+      "news_sentiment": 0.234019,
+      "prediction_signal": 0.287601,
+      "technical_summary": 0.182065
+    },
+    "trade_horizon_days": 6
+  },
+  "Real Estate": {
+    "equity_only": true,
+    "min_confidence": 0.5533517048425279,
+    "min_risk_reward": 0.9795401221891817,
+    "momentum_weights": {
+      "adx": 0.203003,
+      "bollinger": 0.067276,
+      "macd": 0.051652,
+      "obv": 0.248918,
+      "rsi": 0.215078,
+      "stochastic": 0.214074
+    },
+    "signal_weights": {
+      "historical_trend": 0.35106,
+      "market_trend": 0.115793,
+      "news_sentiment": 0.355777,
+      "prediction_signal": 0.110997,
+      "technical_summary": 0.066372
+    },
+    "trade_horizon_days": 6
+  },
+  "Utilities": {
+    "equity_only": true,
+    "min_confidence": 0.1499420299234678,
+    "min_risk_reward": 1.2809827870522144,
+    "momentum_weights": {
+      "adx": 0.00331,
+      "bollinger": 0.330269,
+      "macd": 0.183405,
+      "obv": 0.002228,
+      "rsi": 0.128697,
+      "stochastic": 0.35209
+    },
+    "signal_weights": {
+      "historical_trend": 0.118909,
+      "market_trend": 0.075687,
+      "news_sentiment": 0.354615,
+      "prediction_signal": 0.092369,
+      "technical_summary": 0.35842
+    },
+    "trade_horizon_days": 3
+  }
+}

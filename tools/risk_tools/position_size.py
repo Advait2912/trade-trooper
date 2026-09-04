@@ -68,10 +68,32 @@ def calculate_position_size(
             "errors": ["Invalid or zero capital — cannot size position."],
         }
 
+    if entry <= 0:
+        return {
+            "equity_shares": 0.0,
+            "equity_dollar_value": 0.0,
+            "option_contracts": 0.0,
+            "option_premium_risk": 0.0,
+            "delta_exposure": 0.0,
+            "capital_at_risk": 0.0,
+            "capital_at_risk_pct": 0.0,
+            "risk_per_trade_pct": risk_per_trade_pct,
+            "confidence_factor": 0.0,
+            "iv_quality_factor": iv_quality,
+            "spread_factor": 1.0,
+            "drawdown_factor": 1.0,
+            "sizing_method": "fixed_fractional",
+            "errors": ["Invalid or zero entry price — cannot size position."],
+        }
+
     stop_distance = entry - stop
-    if entry <= 0 or stop_distance <= 0:
-        errors.append("Invalid entry/stop: stop must be below entry for a long position.")
-        stop_distance = 0.0
+    if stop_distance <= 0:
+        # Defensive fallback: a missing/inverted stop means no usable risk
+        # distance, so fall back to a hard 2% stop instead of sizing zero.
+        stop_distance = entry * 0.02
+        errors.append(
+            "Invalid stop (must be below entry); using 2% of entry as hard stop."
+        )
 
     risk_amount = capital * risk_per_trade_pct
 

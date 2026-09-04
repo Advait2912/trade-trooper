@@ -1,0 +1,86 @@
+{
+  "Communication Services": {
+    "equity_only": false,
+    "min_confidence": 0.20399866193062494,
+    "min_risk_reward": 2.0684265207823387,
+    "momentum_weights": {
+      "adx": 0.005836,
+      "bollinger": 0.067249,
+      "macd": 0.260967,
+      "obv": 0.249347,
+      "rsi": 0.314072,
+      "stochastic": 0.102528
+    },
+    "signal_weights": {
+      "historical_trend": 0.073408,
+      "market_trend": 0.089986,
+      "news_sentiment": 0.258392,
+      "prediction_signal": 0.315514,
+      "technical_summary": 0.262699
+    },
+    "trade_horizon_days": 5
+  },
+  "Consumer Staples": {
+    "equity_only": true,
+    "min_confidence": 0.46112989938584636,
+    "min_risk_reward": 0.5001603156122582,
+    "momentum_weights": {
+      "adx": 0.208552,
+      "bollinger": 0.208439,
+      "macd": 0.001113,
+      "obv": 0.119047,
+      "rsi": 0.187372,
+      "stochastic": 0.275478
+    },
+    "signal_weights": {
+      "historical_trend": 0.310814,
+      "market_trend": 0.254673,
+      "news_sentiment": 0.305767,
+      "prediction_signal": 0.068121,
+      "technical_summary": 0.060624
+    },
+    "trade_horizon_days": 5
+  },
+  "Energy": {
+    "equity_only": true,
+    "min_confidence": 0.5976565319009488,
+    "min_risk_reward": 1.455159282876821,
+    "momentum_weights": {
+      "adx": 0.264466,
+      "bollinger": 0.246031,
+      "macd": 0.238217,
+      "obv": 0.057946,
+      "rsi": 0.101939,
+      "stochastic": 0.0914
+    },
+    "signal_weights": {
+      "historical_trend": 0.241741,
+      "market_trend": 0.281602,
+      "news_sentiment": 0.321829,
+      "prediction_signal": 0.086189,
+      "technical_summary": 0.068638
+    },
+    "trade_horizon_days": 5
+  },
+  "Industrials": {
+    "equity_only": true,
+    "min_confidence": 0.32371137952965745,
+    "min_risk_reward": 1.149594003008016,
+    "momentum_weights": {
+      "adx": 0.197012,
+      "bollinger": 0.077472,
+      "macd": 0.063957,
+      "obv": 0.227325,
+      "rsi": 0.266319,
+      "stochastic": 0.167915
+    },
+    "signal_weights": {
+      "historical_trend": 0.448125,
+      "market_trend": 0.11256,
+      "news_sentiment": 0.253944,
+      "prediction_signal": 0.106513,
+      "technical_summary": 0.078858
+    },
+    "trade_horizon_days": 6
+  }
+}

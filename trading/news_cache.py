@@ -15,6 +15,7 @@ next bar.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -105,7 +106,11 @@ class NewsCache:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path))
+        # WAL + busy timeout so concurrent cache-build processes can share the
+        # DB without "database is locked" failures.
+        self._conn = sqlite3.connect(str(self._path), timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -201,6 +206,10 @@ async def fetch_news_range(
         page_token = payload.get("next_page_token") if isinstance(payload, dict) else None
         if not page_token:
             break
+        # Throttle pagination so parallel cache builds stay under the news
+        # endpoint's rate limit (~200 req/min) instead of burning retries on
+        # 429s.  2.5s/page keeps up to 6 concurrent processes in-budget.
+        await asyncio.sleep(2.5)
 
     seen: set[str] = set()
     deduped: list[NewsArticle] = []

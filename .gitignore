@@ -25,7 +25,14 @@ trade.log
 
 # Runtime artifacts (DBs, journals, logs)
 data/*
-!data/weights_db.json
+!data/news_cache.db
+!data/final_report.json
+!data/weights_db*.json
+!data/journals/
+!data/journals/*.db
+data/runner.pid
+data/runner.log
+data/logs/
 
 # IDE & temporary notes
 .idea/

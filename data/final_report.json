@@ -1,0 +1,39 @@
+{
+  "project": "trade_trooper",
+  "generated_at": "2026-09-04",
+  "headline": "Held-out validation showed Optuna tuning overfits; running live with DEFAULT weights (PF 1.38 held-out) is the honest choice.",
+  "news_cache": {
+    "tickers": 66,
+    "articles_scored": 56465,
+    "window": "2025-01-01..2026-09-04",
+    "model": "ProsusAI/finbert (P(pos)-P(neg))",
+    "device": "cuda"
+  },
+  "tuning": {
+    "industries_tuned": 11,
+    "trials_per_industry": 15,
+    "window": "12 months",
+    "weights_db": "data/weights_db_tuned_backup.json",
+    "note": "All 11 industries tuned with Optuna (news-aware)."
+  },
+  "out_of_sample_validation": {
+    "train": "2025-01-01..2025-12-31 (12 months, Optuna)",
+    "test": "2026-01-05..2026-09-04 (8 months, held out)",
+    "universe": "NVDA,AAPL,JPM,XOM,KO,TSLA,LLY,GS",
+    "trained_weights_pf": 0.51,
+    "trained_weights_pnl": -2724.45,
+    "trained_weights_trades": 56,
+    "default_weights_pf": 1.38,
+    "default_weights_pnl": 2832.76,
+    "default_weights_trades": 93,
+    "default_weights_win_rate": 0.484,
+    "conclusion": "Tuned configs overfit; defaults generalize better. Gate (PF>=1.5) not met by trained weights."
+  },
+  "live_decision": {
+    "mode": "paper trading",
+    "weights": "DEFAULT (untuned)",
+    "risk_profile": "Balanced",
+    "go_live": true
+  },
+  "disclaimer": "Paper trading only. Fills simulated; commissions not modeled."
+}

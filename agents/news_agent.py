@@ -25,6 +25,30 @@ from utils.logging import StageTimer
 
 log = logging.getLogger("market_intel_agent.news_agent")
 
+_local_finbert: "FinBertSentiment | None" = None
+_local_finbert_unavailable = False
+
+
+def _score_local_finbert(texts: list[str]) -> list[dict] | None:
+    """Score texts with the local FinBERT scorer (module-level singleton).
+
+    Returns None when torch/transformers are not installed or the model
+    cannot be loaded, so callers degrade to Ollama / neutral.
+    """
+    global _local_finbert, _local_finbert_unavailable
+    if _local_finbert_unavailable:
+        return None
+    if _local_finbert is None:
+        try:
+            from tools.finbert_sentiment import FinBertSentiment
+
+            _local_finbert = FinBertSentiment(device="cuda")
+        except Exception as exc:  # noqa: BLE001 - optional dependency
+            log.warning("Local FinBERT unavailable: %s", exc)
+            _local_finbert_unavailable = True
+            return None
+    return _local_finbert.score_batch(texts, batch_size=32)
+
 
 class NewsCollectionAgent(BaseAgent):
     """Fetches + filters Alpaca news and scores sentiment per article."""
@@ -114,7 +138,25 @@ class NewsCollectionAgent(BaseAgent):
                     exc,
                 )
 
-        # 2. Try Ollama if LLM synthesis is enabled
+        # 2. Local FinBERT scorer (GPU) — same model + scoring as the
+        #    backtest news cache, so live sentiment matches what the tuned
+        #    weights were optimized against.  Loaded once per process.
+        try:
+            local_scores = _score_local_finbert(
+                [f"{a.headline}. {a.summary}".strip() for a in articles]
+            )
+            if local_scores is not None:
+                log.info("Scored %d articles via local FinBERT (GPU)", len(articles))
+                return [
+                    _finbert_score_to_initial(
+                        ticker, a, str(s.get("label", "neutral")), float(s.get("score", 0.0) or 0.0)
+                    )
+                    for a, s in zip(articles, local_scores)
+                ]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Local FinBERT scoring failed: %s; falling back", exc)
+
+        # 3. Try Ollama if LLM synthesis is enabled
         if self.settings.enable_llm_synthesis:
             try:
                 results: list[InitialAnalysis] = []
