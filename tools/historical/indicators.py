@@ -535,3 +535,160 @@ def calculate_obv(
         "obv_trend": obv_trend,
         "volume_confirmation": confirmation,
     }
+
+
+def calculate_ttm_squeeze(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 20,
+    bb_mult: float = 2.0,
+    kc_mult: float = 1.5,
+) -> dict[str, Any]:
+    """Calculate John Carter's TTM Squeeze indicator for options trading.
+
+    A Squeeze occurs when Bollinger Bands (20, 2.0) compress inside Keltner
+    Channels (20, 1.5 ATR). When the squeeze fires (bands break outside channels),
+    explosive directional momentum follows — the ideal entry point for options.
+    """
+    n = len(closes)
+    if n < period + 5 or len(highs) < n or len(lows) < n:
+        return {
+            "squeeze_on": False,
+            "squeeze_fired": False,
+            "momentum_hist": 0.0,
+            "momentum_slope": "flat",
+            "breakout_signal": "neutral",
+            "band_compression_ratio": 1.0,
+        }
+
+    c_s = pd.Series([float(c) for c in closes], dtype="float64")
+    h_s = pd.Series([float(h) for h in highs], dtype="float64")
+    l_s = pd.Series([float(l) for l in lows], dtype="float64")
+
+    # 1. Bollinger Bands
+    sma_20 = c_s.rolling(period).mean()
+    std_20 = c_s.rolling(period).std(ddof=0)
+    bb_upper = sma_20 + bb_mult * std_20
+    bb_lower = sma_20 - bb_mult * std_20
+
+    # 2. Keltner Channels
+    ema_20 = c_s.ewm(span=period, adjust=False).mean()
+    trs = [
+        max(h_s.iloc[i] - l_s.iloc[i],
+            abs(h_s.iloc[i] - c_s.iloc[i - 1]),
+            abs(l_s.iloc[i] - c_s.iloc[i - 1]))
+        if i > 0 else h_s.iloc[i] - l_s.iloc[i]
+        for i in range(n)
+    ]
+    atr_20 = pd.Series(trs, dtype="float64").rolling(period).mean()
+    kc_upper = ema_20 + kc_mult * atr_20
+    kc_lower = ema_20 - kc_mult * atr_20
+
+    # Squeeze is on when BB is inside KC
+    squeeze_series = (bb_upper < kc_upper) & (bb_lower > kc_lower)
+    squeeze_on = bool(squeeze_series.iloc[-1])
+    prior_squeeze = bool(squeeze_series.iloc[-2]) if len(squeeze_series) >= 2 else False
+    squeeze_fired = prior_squeeze and not squeeze_on
+
+    # Band compression ratio: BB width / KC width
+    bb_width = float((bb_upper.iloc[-1] - bb_lower.iloc[-1]) or 1.0)
+    kc_width = float((kc_upper.iloc[-1] - kc_lower.iloc[-1]) or 1.0)
+    compression_ratio = round(bb_width / kc_width, 4)
+
+    # 3. Momentum Histogram
+    donchian_mid = (h_s.rolling(period).max() + l_s.rolling(period).min()) / 2.0
+    baseline = (sma_20 + donchian_mid) / 2.0
+    delta = c_s - baseline
+
+    mom_curr = float(delta.iloc[-1]) if not np.isnan(delta.iloc[-1]) else 0.0
+    mom_prev = float(delta.iloc[-2]) if len(delta) >= 2 and not np.isnan(delta.iloc[-2]) else 0.0
+
+    if mom_curr >= 0:
+        mom_slope = "increasing_bullish" if mom_curr >= mom_prev else "decreasing_bullish"
+    else:
+        mom_slope = "increasing_bearish" if mom_curr <= mom_prev else "decreasing_bearish"
+
+    # Signal generation
+    if squeeze_fired:
+        breakout = "bullish_breakout" if mom_curr > 0 else "bearish_breakout"
+    elif squeeze_on:
+        breakout = "consolidating"
+    else:
+        if mom_slope == "increasing_bullish":
+            breakout = "bullish_expansion"
+        elif mom_slope == "increasing_bearish":
+            breakout = "bearish_expansion"
+        else:
+            breakout = "neutral"
+
+    return {
+        "squeeze_on": squeeze_on,
+        "squeeze_fired": squeeze_fired,
+        "momentum_hist": round(mom_curr, 4),
+        "momentum_slope": mom_slope,
+        "breakout_signal": breakout,
+        "band_compression_ratio": compression_ratio,
+    }
+
+
+def calculate_iv_rank(
+    closes: Sequence[float],
+    short_period: int = 20,
+    long_period: int = 252,
+) -> dict[str, Any]:
+    """Calculate Realized Volatility Rank, Percentile, and Volatility Expansion.
+
+    Assesses whether option premiums are underpriced (cheap, prime for buying)
+    or overpriced (high crush risk, avoid buying options).
+    """
+    n = len(closes)
+    if n < short_period + 2:
+        return {
+            "current_hv": 0.0,
+            "iv_rank": 50.0,
+            "vol_regime": "fair_value",
+            "vol_expansion": False,
+            "short_term_hv": 0.0,
+            "medium_term_hv": 0.0,
+        }
+
+    c_s = pd.Series([float(c) for c in closes], dtype="float64")
+    log_ret = np.log(c_s / c_s.shift(1)).dropna()
+
+    rolling_short = log_ret.rolling(short_period).std() * math.sqrt(252.0) * 100.0
+    current_hv = float(rolling_short.iloc[-1]) if not np.isnan(rolling_short.iloc[-1]) else 0.0
+
+    # Rolling window for rank (up to long_period)
+    lookback = min(len(rolling_short.dropna()), long_period)
+    window = rolling_short.dropna().tail(lookback)
+
+    if len(window) >= 10:
+        min_vol = float(window.min())
+        max_vol = float(window.max())
+        denom = max_vol - min_vol
+        iv_rank = round(((current_hv - min_vol) / denom * 100.0) if denom > 0 else 50.0, 1)
+    else:
+        iv_rank = 50.0
+
+    # 10-day vs 30-day volatility expansion
+    vol_10 = float((log_ret.tail(10).std() * math.sqrt(252.0) * 100.0)) if len(log_ret) >= 10 else current_hv
+    vol_30 = float((log_ret.tail(30).std() * math.sqrt(252.0) * 100.0)) if len(log_ret) >= 30 else current_hv
+    vol_expansion = vol_10 > vol_30 * 1.05
+
+    if iv_rank < 35.0:
+        vol_regime = "cheap_options"      # Prime for buying calls/puts
+    elif iv_rank > 80.0:
+        vol_regime = "expensive_options"  # High IV crush risk
+    else:
+        vol_regime = "fair_value"
+
+    return {
+        "current_hv": round(current_hv, 2),
+        "iv_rank": max(0.0, min(100.0, iv_rank)),
+        "vol_regime": vol_regime,
+        "vol_expansion": vol_expansion,
+        "short_term_hv": round(vol_10, 2),
+        "medium_term_hv": round(vol_30, 2),
+    }
+

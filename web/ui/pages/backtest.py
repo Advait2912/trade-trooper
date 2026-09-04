@@ -24,7 +24,7 @@ from web.ui.data import (
 )
 from web.ui.job_widgets import jobs_auto_refresh, render_job
 from web.ui.theme import kpi_tile, section
-from web.ui.trace import chat_about_trade, decision_trace_text
+from web.ui.trace import chat_about_trade, decision_trace_text, generate_backtest_analysis
 from weights_db import INDUSTRY_STOCKS, TICKER_NAMESPACE, load_weights_db, resolve_industry
 
 
@@ -86,7 +86,8 @@ def _launch_form() -> tuple[list[str], dict]:
                    "--universe", ",".join(tickers),
                    "--start-date", start.isoformat(), "--end-date", end.isoformat(),
                    "--journal", str(journal_path)]
-            cmd += ["--weights-db", str(weights_db_path()) if use_weights else ""]
+            if use_weights:
+                cmd += ["--weights-db", str(weights_db_path())]
             jobs.launch(job_id, cmd)
             st.success(f"Backtest job {job_id} launched.")
             st.rerun()
@@ -128,6 +129,33 @@ def _render_results(job_id: str, params: dict) -> None:
         kpi_tile("Expectancy", f"${trades['pnl'].mean():,.2f}")
     with c5:
         kpi_tile("Max drawdown", f"${max_dd:,.0f}")
+
+    with st.expander("🧠 Generate AI Analysis with Ollama (Performance & Log Synthesis)", expanded=False):
+        st.caption("Passes the full backtest KPIs, top trades, exit reasons, and execution logs to local Ollama for strategic reasoning.")
+        custom_prompt = st.text_input(
+            "Analysis instructions",
+            value="Synthesize the trading performance, win rate, risk metrics, and what the execution logs reveal about edge and execution quality.",
+            key=f"bt_ai_prompt_{job_id}",
+        )
+        if st.button("⚡ Generate Analysis", type="primary", key=f"bt_ai_btn_{job_id}"):
+            with st.spinner("Ollama is analyzing backtest telemetry & execution logs..."):
+                kpis = {
+                    "trades_count": len(trades),
+                    "win_rate": f"{len(wins) / len(trades) * 100:.1f}%",
+                    "profit_factor": f"{pf:.2f}" if pf != float("inf") else "∞",
+                    "expectancy": f"${trades['pnl'].mean():,.2f}",
+                    "max_drawdown": f"${max_dd:,.0f}",
+                    "total_pnl": float(trades["pnl"].sum()),
+                }
+                job_logs = jobs.get_job_log(job_id, max_lines=50)
+                analysis_text = generate_backtest_analysis(
+                    kpis=kpis,
+                    trades=trades,
+                    params=params,
+                    logs=job_logs,
+                    question=custom_prompt,
+                )
+            st.markdown(analysis_text)
 
     st.plotly_chart(charts.cumulative_pnl(trades), width="stretch")
     col_a, col_b = st.columns(2)
@@ -186,11 +214,12 @@ def _explain_trades(trades: pd.DataFrame, cycles: pd.DataFrame, job_id: str) -> 
             value="Explain what happened and whether the decision was sound.",
             key=f"explain_q_{job_id}")
         if st.button("Run", type="primary", key=f"explain_run_{job_id}"):
-            with st.spinner("Reasoning over the decision trace…"):
-                trace = decision_trace_text(snapshot, row.to_dict())
+            with st.spinner("Reasoning over the decision trace and execution logs…"):
+                job_logs = jobs.get_job_log(job_id, max_lines=40)
+                trace = decision_trace_text(snapshot, row.to_dict(), logs=job_logs)
                 reply = chat_about_trade(trace, question)
             st.markdown(reply)
-            with st.expander("Decision trace"):
+            with st.expander("Decision trace (including execution logs)"):
                 st.code(trace)
 
 

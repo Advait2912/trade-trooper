@@ -30,6 +30,7 @@ class TuningConfig:
         "bollinger": 0.15,
         "obv": 0.10,
         "stochastic": 0.10,
+        "squeeze": 0.0,
     })
     adx_strength_scale: dict[str, float] = field(default_factory=lambda: {
         "no_trend": 0.0,
@@ -147,11 +148,16 @@ class TuningConfig:
     # Phase 4 — instrument preference (long options carry theta + spread)
     # ------------------------------------------------------------------
     equity_only: bool = False         # True -> only build the long-equity candidate
+    options_only: bool = True         # True -> only build option candidates (long_call, long_put) by default
     equity_score_boost: float = 0.0   # added to equity candidates' opportunity score
 
     def to_dict(self) -> dict:
         """Return a flat dict of all knobs (for serialization / display)."""
         return asdict(self)
+
+    def __post_init__(self) -> None:
+        if self.equity_only and self.options_only:
+            self.options_only = False
 
     @classmethod
     def from_overrides(cls, overrides: dict) -> "TuningConfig":
@@ -161,6 +167,8 @@ class TuningConfig:
         immediately instead of silently being ignored.
         """
         cfg = cls()
+        if overrides.get("equity_only") and "options_only" not in overrides:
+            cfg.options_only = False
         for key, value in overrides.items():
             if not hasattr(cfg, key):
                 raise ValueError(f"Unknown tuning key: {key!r}")
@@ -176,23 +184,27 @@ DEFAULT_TUNING = TuningConfig()
 # may be TuningConfig fields or Settings fields (gates/sizing); the harness
 # routes them accordingly.
 PRESETS: dict[str, dict] = {
-    "default": {},
-    "equity_only": {"equity_only": True},
+    "default": {"options_only": True, "equity_only": False},
+    "equity_only": {"equity_only": True, "options_only": False},
+    "options_only": {"options_only": True, "equity_only": False},
     "conservative": {
         "min_confidence": 0.50,
         "min_risk_reward": 1.25,
-        "equity_only": True,
+        "options_only": True,
+        "equity_only": False,
         "trade_horizon_days": 7,
     },
     "balanced": {
         "min_confidence": 0.40,
         "min_risk_reward": 1.0,
+        "options_only": True,
         "equity_only": False,
         "trade_horizon_days": 5,
     },
     "aggressive": {
         "min_confidence": 0.30,
         "min_risk_reward": 0.75,
+        "options_only": True,
         "equity_only": False,
         "trade_horizon_days": 3,
     },
@@ -215,7 +227,8 @@ PRESETS: dict[str, dict] = {
         },
     },
     "tuned": {
-        "equity_only": True,
+        "options_only": True,
+        "equity_only": False,
         "min_confidence": 0.5217848157486161,
         "min_risk_reward": 0.882230414539783,
         "trade_horizon_days": 7,

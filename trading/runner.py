@@ -161,15 +161,26 @@ class PortfolioRunner:
             # 4. Re-read positions after closes
             positions = await client.get_positions()
 
-            # 5. Execute new entries (independent per ticker, faithful to backtest)
+            # 5. Execute new entries (ranked across universe by opportunity score)
             t_order_start = _time.perf_counter()
+            candidates_to_enter = []
             for t, rep in zip(self.tickers, reports):
                 if isinstance(rep, Exception):
                     continue
                 d = rep.decision
+                top_opp = d.opportunities[0] if getattr(d, "opportunities", None) else None
+                score = float(getattr(top_opp, "score", 0.0) or (d.confidence_score * 100.0))
+                candidates_to_enter.append((score, d.confidence_score, t, rep))
+
+            # Highest opportunity score and confidence get portfolio allocation first
+            candidates_to_enter.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+            for score, conf, t, rep in candidates_to_enter:
+                d = rep.decision
                 t_result: dict[str, Any] = {
                     "decision": d.trade_decision,
                     "confidence": d.confidence_score,
+                    "opportunity_score": round(score, 1),
                 }
 
                 # Check ticker daily loss limit

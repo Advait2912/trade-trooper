@@ -18,7 +18,7 @@ log = logging.getLogger("market_intel_agent.alpaca")
 
 DATA_BASE_URL = "https://data.alpaca.markets"
 
-_MAX_RETRIES = 8
+_MAX_RETRIES = 3
 _RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
@@ -118,5 +118,5 @@ class AlpacaClient:
 
 
 def _backoff(attempt: int) -> float:
-    """Exponential backoff: 1s, 2s, 4s, 8s, ... (rate-limit friendly)."""
-    return 1.0 * (2 ** attempt)
+    """Exponential backoff: 0.5s, 1.0s, 2.0s (capped at 2.0s)."""
+    return min(2.0, 0.5 * (2 ** attempt))

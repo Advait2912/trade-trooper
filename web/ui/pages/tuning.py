@@ -183,8 +183,14 @@ def _weights_editor() -> None:
         with col3:
             edits["trade_horizon_days"] = st.number_input(
                 "trade_horizon_days", 1, 30, int(cfg.get("trade_horizon_days", 5)), 1)
-        edits["equity_only"] = st.checkbox("equity_only (equities only, no options)",
-                                           value=bool(cfg.get("equity_only", False)))
+
+        c_opt1, c_opt2 = st.columns(2)
+        with c_opt1:
+            edits["options_only"] = st.checkbox("options_only (trade options only)",
+                                                value=bool(cfg.get("options_only", True)))
+        with c_opt2:
+            edits["equity_only"] = st.checkbox("equity_only (equities only, no options)",
+                                               value=bool(cfg.get("equity_only", False)))
 
         st.markdown("**momentum_weights**")
         momentum = _edit_weights_dict(cfg.get("momentum_weights", {}), f"mw_{selected}")

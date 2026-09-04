@@ -11,9 +11,9 @@ from web.ui.runner_control import DEFAULT_UNIVERSE, restart, start, status, stop
 from web.ui.theme import section, status_pill
 
 RISK_PROFILES = {
-    "Conservative": {"min_confidence": 0.50, "min_risk_reward": 1.25, "equity_only": True, "trade_horizon_days": 7},
-    "Balanced": {"min_confidence": 0.40, "min_risk_reward": 1.00, "equity_only": False, "trade_horizon_days": 5},
-    "Aggressive": {"min_confidence": 0.30, "min_risk_reward": 0.75, "equity_only": False, "trade_horizon_days": 3},
+    "Conservative": {"min_confidence": 0.50, "min_risk_reward": 1.25, "options_only": True, "equity_only": False, "trade_horizon_days": 7},
+    "Balanced": {"min_confidence": 0.40, "min_risk_reward": 1.00, "options_only": True, "equity_only": False, "trade_horizon_days": 5},
+    "Aggressive": {"min_confidence": 0.30, "min_risk_reward": 0.75, "options_only": True, "equity_only": False, "trade_horizon_days": 3},
 }
 
 
@@ -86,6 +86,8 @@ def _risk_profile() -> None:
             "MIN_CONFIDENCE": str(RISK_PROFILES[profile]["min_confidence"]),
             "MIN_RISK_REWARD": str(RISK_PROFILES[profile]["min_risk_reward"]),
             "TRADE_HORIZON_DAYS": str(RISK_PROFILES[profile]["trade_horizon_days"]),
+            "OPTIONS_ONLY": "true",
+            "EQUITY_ONLY": "false",
         }
         write_env(patch)
         st.success(f"Profile '{profile}' written to .env — next cycle picks it up.")

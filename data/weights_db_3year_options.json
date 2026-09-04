@@ -1,0 +1,27 @@
+{
+  "options_3year_tuned": {
+    "equity_only": false,
+    "options_only": true,
+    "risk_per_trade_pct": 0.03278331879330959,
+    "max_position_pct": 0.15,
+    "min_confidence": 0.4131253853389058,
+    "min_risk_reward": 0.8960692702913527,
+    "trade_horizon_days": 4,
+    "momentum_weights": {
+      "macd": 0.19671,
+      "adx": 0.13819,
+      "rsi": 0.08405,
+      "bollinger": 0.33396,
+      "obv": 0.03477,
+      "stochastic": 0.14959,
+      "squeeze": 0.06273
+    },
+    "signal_weights": {
+      "news_sentiment": 0.31783,
+      "technical_summary": 0.03461,
+      "historical_trend": 0.26864,
+      "prediction_signal": 0.07177,
+      "market_trend": 0.30714
+    }
+  }
+}

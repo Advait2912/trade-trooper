@@ -201,6 +201,16 @@ TOOL_SPECS: dict[str, dict[str, Any]] = {
         "agent": "historical",
         "description": "Calculate On-Balance Volume (volume indicator)",
     },
+    "calculate_ttm_squeeze": {
+        "phase": 1,
+        "agent": "historical",
+        "description": "Calculate TTM Squeeze indicator for options breakout entries",
+    },
+    "calculate_iv_rank": {
+        "phase": 1,
+        "agent": "historical",
+        "description": "Calculate Implied/Realized Volatility Rank and Percentile",
+    },
     "identify_support_resistance": {
         "phase": 1,
         "agent": "historical",
@@ -355,6 +365,8 @@ def import_handlers(tool_names: list[str] | None = None) -> dict[str, Callable[.
         "calculate_atr": "tools.historical.indicators",
         "calculate_adx": "tools.historical.indicators",
         "calculate_obv": "tools.historical.indicators",
+        "calculate_ttm_squeeze": "tools.historical.indicators",
+        "calculate_iv_rank": "tools.historical.indicators",
         "identify_support_resistance": "tools.historical.levels",
         "identify_trend": "tools.historical.levels",
         "detect_chart_patterns": "tools.historical.levels",

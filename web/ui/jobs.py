@@ -238,3 +238,14 @@ def list_jobs(kind: str | None = None) -> list[dict]:
 
 def is_running(job_id: str) -> bool:
     return status(job_id).get("status") == "running"
+
+
+def get_job_log(job_id: str, max_lines: int = 60) -> list[str]:
+    """Return the last N lines of a job's log."""
+    log_path = job_dir(job_id) / "job.log"
+    if not log_path.exists():
+        return []
+    try:
+        return log_path.read_text(encoding="utf-8").splitlines()[-max_lines:]
+    except OSError:
+        return []

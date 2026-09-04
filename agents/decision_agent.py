@@ -275,8 +275,9 @@ def _build_candidates(
                            stop_distance=stop_distance)
             )
 
-    # long equity — sized by Phase 3
-    if composite_bias == "bullish" and eq.shares > 0:
+    # long equity — sized by Phase 3 (skipped if options_only is enabled)
+    options_only = bool(getattr(tuning or TuningConfig(), "options_only", False))
+    if not options_only and composite_bias == "bullish" and eq.shares > 0:
         candidates.append(
             _candidate("", spot, risk, matches=True, confidence=cand_confidence,
                        shares=eq.shares, premium_risk=0.0, stop_distance=stop_distance)

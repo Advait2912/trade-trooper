@@ -57,8 +57,17 @@ class FinBertSentiment:
 
         self._torch = torch
         self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self._model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        import os  # noqa: PLC0415
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+            self._model = AutoModelForSequenceClassification.from_pretrained(model_name, local_files_only=True)
+        else:
+            try:
+                self._tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+                self._model = AutoModelForSequenceClassification.from_pretrained(model_name, local_files_only=True)
+            except Exception:
+                self._tokenizer = AutoTokenizer.from_pretrained(model_name)
+                self._model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self._model.to(self._device)
         self._model.eval()
 
