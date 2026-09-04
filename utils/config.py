@@ -65,8 +65,10 @@ class Settings:
     # Trading (execution) — paper only, kill-switched.
     trading_enabled: bool = False       # set true to allow the paper runner
     trading_interval_min: int = 30      # cycle interval in minutes
-    max_open_positions: int = 1         # one position at a time
+    max_open_positions: int = 3         # max simultaneous positions across tickers
+    max_open_positions_per_ticker: int = 1  # max positions in a single ticker
     daily_loss_limit_pct: float = 0.02  # stop trading for the day if hit (fraction)
+    max_portfolio_drawdown_pct: float = 0.10  # halt all entries if portfolio DD from peak hits this
     order_type: str = "limit"           # limit | market
     limit_slippage_pct: float = 0.0     # extra % away from mid for limit fills
     trade_horizon_days: int = 5         # max holding period (calendar days)
@@ -144,13 +146,19 @@ def load_settings() -> Settings:
     trading_enabled = _env("TRADING_ENABLED", "false").lower() in ("1", "true", "yes")
     try:
         trading_interval_min = int(_env("TRADING_INTERVAL_MIN", "30"))
-        max_open_positions = int(_env("MAX_OPEN_POSITIONS", "1"))
+        max_open_positions = int(_env("MAX_OPEN_POSITIONS", "3"))
+        max_open_positions_per_ticker = int(_env("MAX_OPEN_POSITIONS_PER_TICKER", "1"))
         trade_horizon_days = int(_env("TRADE_HORIZON_DAYS", "5"))
     except ValueError as exc:  # pragma: no cover - defensive
         raise ConfigError(
-            "TRADING_INTERVAL_MIN, MAX_OPEN_POSITIONS and TRADE_HORIZON_DAYS "
-            "must be integers."
+            "TRADING_INTERVAL_MIN, MAX_OPEN_POSITIONS, "
+            "MAX_OPEN_POSITIONS_PER_TICKER and TRADE_HORIZON_DAYS must be integers."
         ) from exc
+
+    try:
+        max_portfolio_drawdown_pct = float(_env("MAX_PORTFOLIO_DRAWDOWN_PCT", "0.10"))
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise ConfigError("MAX_PORTFOLIO_DRAWDOWN_PCT must be a number.") from exc
 
     order_type = _env("ORDER_TYPE", "limit").lower()
     if order_type not in ("limit", "market"):
@@ -182,7 +190,9 @@ def load_settings() -> Settings:
         trading_enabled=trading_enabled,
         trading_interval_min=trading_interval_min,
         max_open_positions=max_open_positions,
+        max_open_positions_per_ticker=max_open_positions_per_ticker,
         daily_loss_limit_pct=daily_loss_limit_pct,
+        max_portfolio_drawdown_pct=max_portfolio_drawdown_pct,
         order_type=order_type,
         limit_slippage_pct=float(_env("LIMIT_SLIPPAGE_PCT", "0")),
         trade_horizon_days=trade_horizon_days,

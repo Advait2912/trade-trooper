@@ -98,15 +98,13 @@ def synthesize_signals(
 
     if prediction is not None:
         composite = str(getattr(prediction, "composite_signal", "neutral"))
-        confidence = float(getattr(prediction, "confidence", 0.0) or 0.0)
-        weight = sw["prediction_signal"]
         bias = "bullish" if composite == "bullish" else ("bearish" if composite == "bearish" else "neutral")
-        # scale vote by prediction confidence so low-confidence predictions
-        # contribute less to the composite.
-        strength = _BIAS[bias] * (0.5 + 0.5 * max(0.0, min(1.0, confidence)))
-        bias = "bullish" if strength > 0 else ("bearish" if strength < 0 else "neutral")
-        votes.append(Signal("prediction_signal", bias, weight,
-                            f"composite_signal={composite}, conf={confidence:.2f}"))
+        # Direction-only vote.  Prediction confidence is deliberately NOT used
+        # here: it is reserved for the Phase 4 confidence gate and Phase 3
+        # position sizing, so the tuning harness can adjust voting weights and
+        # confidence knobs independently (no double-counting).
+        votes.append(Signal("prediction_signal", bias, sw["prediction_signal"],
+                            f"composite_signal={composite}"))
 
     market = getattr(bundle, "market", None)
     if market is not None:

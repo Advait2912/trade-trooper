@@ -81,6 +81,8 @@ class PortfolioRunner:
         self._day_open_equity: dict[str, float] = {}
         self._day_key: str = ""
         self._day_locked: dict[str, bool] = {t: False for t in self.tickers}
+        self._portfolio_peak_equity: float = 0.0
+        self._portfolio_dd_locked: bool = False
 
     def _rebuild_open_state(self) -> None:
         for t in self.tickers:
@@ -176,9 +178,19 @@ class PortfolioRunner:
                     results["tickers"][t] = t_result
                     continue
 
-                # Count open positions for THIS ticker
+                # Portfolio drawdown kill switch (halts all new entries)
+                if self._portfolio_dd_locked:
+                    t_result["entry_blocked"] = "portfolio_drawdown_limit"
+                    results["tickers"][t] = t_result
+                    continue
+
+                # Count open positions: per-ticker AND portfolio-wide
                 t_positions = [p for p in positions if _get_sym(p).startswith(t)]
-                if len(t_positions) >= self.settings.max_open_positions:
+                if len(t_positions) >= self.settings.max_open_positions_per_ticker:
+                    t_result["entry_blocked"] = "max_positions_per_ticker"
+                    results["tickers"][t] = t_result
+                    continue
+                if len(positions) >= self.settings.max_open_positions:
                     t_result["entry_blocked"] = "max_positions"
                     results["tickers"][t] = t_result
                     continue
@@ -315,6 +327,17 @@ class PortfolioRunner:
             loss_pct = (equity - open_eq) / open_eq
             if loss_pct <= -self.settings.daily_loss_limit_pct:
                 self._day_locked[ticker] = True
+
+        # Portfolio drawdown kill switch: track the equity peak across the
+        # whole run (not just today) and lock new entries when drawdown from
+        # the peak exceeds the configured threshold.
+        peak = self._portfolio_peak_equity
+        if equity > peak:
+            self._portfolio_peak_equity = equity
+        if self._portfolio_peak_equity > 0:
+            dd_pct = (self._portfolio_peak_equity - equity) / self._portfolio_peak_equity
+            if dd_pct >= self.settings.max_portfolio_drawdown_pct:
+                self._portfolio_dd_locked = True
 
 
 class PaperRunner:

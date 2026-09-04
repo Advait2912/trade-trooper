@@ -178,8 +178,24 @@ DEFAULT_TUNING = TuningConfig()
 PRESETS: dict[str, dict] = {
     "default": {},
     "equity_only": {"equity_only": True},
-    "conservative": {"min_confidence": 0.50, "min_risk_reward": 1.25},
-    "aggressive": {"min_confidence": 0.30, "min_risk_reward": 0.75},
+    "conservative": {
+        "min_confidence": 0.50,
+        "min_risk_reward": 1.25,
+        "equity_only": True,
+        "trade_horizon_days": 7,
+    },
+    "balanced": {
+        "min_confidence": 0.40,
+        "min_risk_reward": 1.0,
+        "equity_only": False,
+        "trade_horizon_days": 5,
+    },
+    "aggressive": {
+        "min_confidence": 0.30,
+        "min_risk_reward": 0.75,
+        "equity_only": False,
+        "trade_horizon_days": 3,
+    },
     "signal_prediction_led": {
         "signal_weights": {
             "news_sentiment": 0.10,
