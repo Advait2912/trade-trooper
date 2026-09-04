@@ -31,12 +31,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_REGIME_MULTIPLIERS: dict[str, float] = {
-    "low_contraction": 0.90,
-    "contraction": 1.00,
-    "expansion": 1.20,
-    "high_expansion": 1.45,
-}
+from tuning import DEFAULT_TUNING, TuningConfig
 
 _VOL_BUCKETS = [
     (15.0, "low"),
@@ -55,6 +50,7 @@ def _vol_regime_bucket(hv_pct: float) -> str:
 def forecast_volatility(
     volatility: dict[str, Any],
     historical_trends: dict[str, Any],
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Derive estimated forward volatility from Phase 1 volatility bundle.
 
@@ -96,7 +92,7 @@ def forecast_volatility(
         reversion_bundle.get("mean_reversion_score") or 0.0
     )
 
-    multiplier = _REGIME_MULTIPLIERS.get(regime_str, 1.00)
+    multiplier = (tuning or DEFAULT_TUNING).regime_multipliers.get(regime_str, 1.00)
     iv_estimate = hv_20 * multiplier
 
     # Ensure we return a positive, finite value even with sparse data.

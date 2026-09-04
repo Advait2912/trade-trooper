@@ -12,6 +12,8 @@ import asyncio
 import logging
 from typing import Optional
 
+import httpx
+
 from agents.base import BaseAgent
 from agents.llm import OllamaClient, OllamaError
 from alpaca.client import AlpacaClient, AlpacaError
@@ -84,21 +86,53 @@ class NewsCollectionAgent(BaseAgent):
     async def _analyze_all(
         self, ticker: str, articles: list[NewsArticle]
     ) -> list[InitialAnalysis]:
-        results: list[InitialAnalysis] = []
-        async with OllamaClient(self.settings) as ollama:
-            tasks = [ollama.analyze_initial(ticker, a) for a in articles]
-            outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for article, outcome in zip(articles, outcomes):
-            if isinstance(outcome, BaseException):
-                if isinstance(outcome, OllamaError):
-                    log.warning(
-                        "Initial analysis failed for %r: %s", article.headline, outcome
+        # 1. Prioritize shared FinBERT service when configured
+        if self.settings.finbert_url:
+            try:
+                texts = [f"{a.headline}. {a.summary}".strip() for a in articles]
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{self.settings.finbert_url.rstrip('/')}/score_batch",
+                        json={"texts": texts},
                     )
-                results.append(_fallback_initial(ticker, article))
-            else:
-                results.append(outcome)
-        return results
+                    resp.raise_for_status()
+                    scores = resp.json()
+                    log.info("Scored %d articles via shared FinBERT service", len(articles))
+                    return [
+                        _finbert_score_to_initial(
+                            ticker,
+                            a,
+                            str(s.get("label", "neutral")),
+                            float(s.get("score", 0.0) or 0.0),
+                        )
+                        for a, s in zip(articles, scores)
+                    ]
+            except Exception as exc:
+                log.warning(
+                    "FinBERT scoring via %s failed: %s; falling back",
+                    self.settings.finbert_url,
+                    exc,
+                )
+
+        # 2. Try Ollama if LLM synthesis is enabled
+        if self.settings.enable_llm_synthesis:
+            try:
+                results: list[InitialAnalysis] = []
+                async with OllamaClient(self.settings) as ollama:
+                    tasks = [ollama.analyze_initial(ticker, a) for a in articles]
+                    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+
+                for article, outcome in zip(articles, outcomes):
+                    if isinstance(outcome, BaseException):
+                        results.append(_fallback_initial(ticker, article))
+                    else:
+                        results.append(outcome)
+                return results
+            except Exception as exc:
+                log.warning("Ollama analysis failed: %s; using neutral fallback", exc)
+
+        # 3. Deterministic neutral fallback
+        return [_fallback_initial(ticker, a) for a in articles]
 
     @staticmethod
     def _pick_primary(
@@ -116,6 +150,41 @@ class NewsCollectionAgent(BaseAgent):
             return (a.relevance, materiality)
 
         return max(pairs, key=score)
+
+
+def _finbert_score_to_initial(
+    ticker: str,
+    article: NewsArticle,
+    label: str,
+    score: float,
+) -> InitialAnalysis:
+    from schemas.common import EvidenceQuality, Materiality, Sentiment
+
+    label_lower = label.lower()
+    if "pos" in label_lower:
+        sentiment = Sentiment.BULLISH
+    elif "neg" in label_lower:
+        sentiment = Sentiment.BEARISH
+    else:
+        sentiment = Sentiment.NEUTRAL
+
+    relevance = min(0.9, max(0.5, 0.5 + score * 0.4))
+    materiality = (
+        Materiality.HIGH
+        if score > 0.75
+        else (Materiality.MEDIUM if score > 0.50 else Materiality.LOW)
+    )
+
+    return InitialAnalysis(
+        ticker=ticker,
+        event=article.headline or "No event identified.",
+        relevance=relevance,
+        materiality=materiality,
+        sentiment=sentiment,
+        evidence_quality=EvidenceQuality.MEDIUM,
+        needs_web_research=False,
+        research_questions=[],
+    )
 
 
 def _fallback_initial(ticker: str, article: NewsArticle) -> InitialAnalysis:

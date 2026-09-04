@@ -34,6 +34,7 @@ from tools.risk_tools.greeks import calculate_greeks
 from tools.risk_tools.max_loss import calculate_max_loss
 from tools.risk_tools.position_size import calculate_position_size
 from tools.risk_tools.risk_score import calculate_risk_score, risk_reward_ratio
+from tuning import TuningConfig
 from utils.config import Settings
 
 log = logging.getLogger("market_intel_agent.risk_agent")
@@ -58,7 +59,12 @@ class RiskAgent(BaseAgent):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    async def run(self, phase1: Any, phase2: Any) -> RiskResult:
+    async def run(
+        self,
+        phase1: Any,
+        phase2: Any,
+        tuning: TuningConfig | None = None,
+    ) -> RiskResult:
         """Run Phase 3 risk assessment.
 
         Parameters
@@ -68,6 +74,8 @@ class RiskAgent(BaseAgent):
             ``Phase1Bundle``.
         phase2:
             The ``PredictionResult`` from Phase 2.
+        tuning:
+            Optional ``TuningConfig`` overriding risk parameters.
         """
         if isinstance(phase1, dict):
             bundle = Phase1Bundle.from_phase1_dict(phase1)
@@ -103,7 +111,7 @@ class RiskAgent(BaseAgent):
             errors.append(f"option chain fetch failed: {exc}")
 
         computed = await asyncio.to_thread(
-            _compute_risk, bundle, prediction, chain, self.settings, errors
+            _compute_risk, bundle, prediction, chain, self.settings, errors, tuning
         )
         return computed
 
@@ -114,6 +122,7 @@ def _compute_risk(
     chain: list[dict[str, Any]],
     settings: Settings,
     errors: list[str],
+    tuning: "TuningConfig | None" = None,
 ) -> RiskResult:
     """Synchronous risk computation bundle (runs in a worker thread)."""
     spot = bundle.market.price
@@ -173,6 +182,7 @@ def _compute_risk(
         spread_pct=spread_pct,
         drawdown_risk=drawdown_risk,
         max_position_pct=settings.max_position_pct,
+        tuning=tuning,
     )
     if position.get("errors"):
         errors.extend(position["errors"])
@@ -186,6 +196,7 @@ def _compute_risk(
         gap_frequency=gap_frequency,
         var_pct=var_pct,
         cvar_pct=cvar_pct,
+        tuning=tuning,
     )
 
     # ---- Risk:reward + composite score ----
@@ -198,6 +209,7 @@ def _compute_risk(
         spread_pct=spread_pct,
         max_loss_pct=max_loss["max_loss_pct"],
         confidence=prediction.confidence,
+        tuning=tuning,
     )
 
     risk_level = score["risk_level"]

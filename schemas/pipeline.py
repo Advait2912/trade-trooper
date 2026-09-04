@@ -5,6 +5,8 @@ Final report models (Phases 1-4 feeding the final synthesis) live here.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from schemas.common import (
@@ -149,3 +151,4 @@ class FinalReport(BaseModel):
     decision: DecisionResult = Field(default_factory=lambda: DecisionResult())
     analysis: Analysis = Field(default_factory=lambda: Analysis())
     council_input: CouncilInput = Field(default_factory=lambda: CouncilInput())
+    benchmark: dict[str, Any] = Field(default_factory=dict)

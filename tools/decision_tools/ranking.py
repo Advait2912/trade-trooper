@@ -14,12 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_COMPONENT_MAX = {
-    "signal": 40.0,
-    "reward_risk": 25.0,
-    "risk_quality": 20.0,
-    "execution": 15.0,
-}
+from tuning import DEFAULT_TUNING, TuningConfig
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -33,6 +28,7 @@ def calculate_opportunity_score(
     risk_score: float = 50.0,
     spread_pct: float = 0.0,
     greeks_source: str = "black_scholes_estimated",
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Score a single candidate 0-100 and report component breakdown.
 
@@ -41,31 +37,35 @@ def calculate_opportunity_score(
     mismatch suppresses the signal component to penalise contradicting the
     composite view.
     """
+    t = tuning or DEFAULT_TUNING
+    cm = t.component_max
     direction_matches = bool(candidate.get("direction_matches", True))
     confidence = _clamp(float(candidate.get("confidence", 0.5) or 0.5), 0.0, 1.0)
     r_r = max(0.0, float(candidate.get("r_r", 0.0) or 0.0))
     risk_score = _clamp(float(risk_score), 0.0, 100.0)
     spread_pct = _clamp(float(spread_pct), 0.0, 1.0)
-    execution_mult = 1.0 if greeks_source == "alpaca_option_chain" else 0.6
+    execution_mult = 1.0 if greeks_source == "alpaca_option_chain" else t.execution_fallback_mult
 
     # 1) signal / agreement + confidence, gated by direction agreement.
     signal = 0.5 * _clamp(agreement_score, 0.0, 1.0) + 0.5 * confidence
-    signal_component = _COMPONENT_MAX["signal"] * signal
+    signal_component = cm["signal"] * signal
     if not direction_matches:
         signal_component *= 0.15
 
-    # 2) reward/risk: 3.0+ R:R earns the full band.
-    rr_component = _COMPONENT_MAX["reward_risk"] * _clamp(r_r / 3.0, 0.0, 1.0)
+    # 2) reward/risk: full band at rr_full_at.
+    rr_component = cm["reward_risk"] * _clamp(r_r / t.rr_full_at, 0.0, 1.0)
 
     # 3) risk quality: lower composite risk is better.
-    risk_component = _COMPONENT_MAX["risk_quality"] * (1.0 - risk_score / 100.0)
+    risk_component = cm["risk_quality"] * (1.0 - risk_score / 100.0)
 
     # 4) execution: spread + greeks source quality.
     exec_component = (
-        _COMPONENT_MAX["execution"] * (1.0 - spread_pct / 0.15) * execution_mult
+        cm["execution"] * (1.0 - spread_pct / t.spread_full_at) * execution_mult
     )
 
     score = signal_component + rr_component + risk_component + exec_component
+    if candidate.get("instrument") == "equity":
+        score += t.equity_score_boost
     score = _clamp(score, 0.0, 100.0)
 
     return {
@@ -84,6 +84,7 @@ def rank_opportunities(
     context: dict[str, Any],
     min_confidence: float = 0.35,
     min_risk_reward: float = 1.0,
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Apply gates, score and rank candidates -> trade decision.
 
@@ -132,6 +133,7 @@ def rank_opportunities(
             risk_score=risk_score,
             spread_pct=spread_pct,
             greeks_source=greeks_source,
+            tuning=tuning,
         )
         cand = dict(cand)
         cand["score"] = score_info["score"]

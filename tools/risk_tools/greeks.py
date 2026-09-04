@@ -70,6 +70,29 @@ def _bs_price(
     return strike * math.exp(-r * t) * _normal_cdf(-d2) - spot * _normal_cdf(-d1)
 
 
+def black_scholes_price(
+    spot: float,
+    strike: float,
+    t_years: float,
+    risk_free_rate: float,
+    sigma: float,
+    is_call: bool,
+) -> float:
+    """Black-Scholes option price (public wrapper for the backtest P&L model).
+
+    At (or past) expiry the price collapses to intrinsic value; with zero
+    volatility it collapses to the discounted forward intrinsic value.
+    """
+    if spot <= 0 or strike <= 0:
+        return 0.0
+    if t_years <= 0:
+        return max(spot - strike, 0.0) if is_call else max(strike - spot, 0.0)
+    if sigma <= 0:
+        forward = strike * math.exp(-risk_free_rate * t_years)
+        return max(spot - forward, 0.0) if is_call else max(forward - spot, 0.0)
+    return _bs_price(spot, strike, t_years, risk_free_rate, sigma, is_call)
+
+
 def _bs_greeks(
     spot: float, strike: float, t: float, r: float, sigma: float, is_call: bool
 ) -> dict[str, float]:

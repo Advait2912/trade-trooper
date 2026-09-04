@@ -14,14 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# weight of each directional source in the composite bias
-_SIGNAL_WEIGHTS: dict[str, float] = {
-    "news_sentiment": 0.20,
-    "technical_summary": 0.25,
-    "historical_trend": 0.10,
-    "prediction_signal": 0.30,
-    "market_trend": 0.15,
-}
+from tuning import DEFAULT_TUNING, TuningConfig
 
 _BIAS = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0}
 
@@ -58,6 +51,7 @@ def synthesize_signals(
     bundle: Any,
     prediction: Any,
     risk: Any | None = None,
+    tuning: TuningConfig | None = None,
 ) -> dict[str, Any]:
     """Synthesize a directional composite signal from all Phase 1-2 signals.
 
@@ -78,12 +72,13 @@ def synthesize_signals(
     ``divergences`` and ``notes``.
     """
     votes: list[Signal] = []
+    sw = (tuning or DEFAULT_TUNING).signal_weights
 
     news = getattr(bundle, "news", None)
     if news is not None:
         sentiment_score = float(getattr(news, "sentiment_score", 0.0) or 0.0)
         bias = _bias_from_score(sentiment_score, threshold=0.15)
-        votes.append(Signal("news_sentiment", bias, _SIGNAL_WEIGHTS["news_sentiment"],
+        votes.append(Signal("news_sentiment", bias, sw["news_sentiment"],
                             f"sentiment_score={sentiment_score:.3f}"))
 
     historical = getattr(bundle, "historical", None)
@@ -92,19 +87,19 @@ def synthesize_signals(
         overall = str(summary.get("overall_signal", "neutral"))
         strength = _SUMMARY_STRENGTH.get(overall, 0.0)
         bias = "bullish" if strength > 0 else ("bearish" if strength < 0 else "neutral")
-        votes.append(Signal("technical_summary", bias, _SIGNAL_WEIGHTS["technical_summary"],
+        votes.append(Signal("technical_summary", bias, sw["technical_summary"],
                             f"overall_signal={overall}"))
 
         trends = getattr(historical, "historical_trends", None) or {}
         trend_class = str(trends.get("trend_class", "neutral"))
         bias = "bullish" if trend_class == "bullish" else ("bearish" if trend_class == "bearish" else "neutral")
-        votes.append(Signal("historical_trend", bias, _SIGNAL_WEIGHTS["historical_trend"],
+        votes.append(Signal("historical_trend", bias, sw["historical_trend"],
                             f"trend={trends.get('trend', 'n/a')}"))
 
     if prediction is not None:
         composite = str(getattr(prediction, "composite_signal", "neutral"))
         confidence = float(getattr(prediction, "confidence", 0.0) or 0.0)
-        weight = _SIGNAL_WEIGHTS["prediction_signal"]
+        weight = sw["prediction_signal"]
         bias = "bullish" if composite == "bullish" else ("bearish" if composite == "bearish" else "neutral")
         # scale vote by prediction confidence so low-confidence predictions
         # contribute less to the composite.
@@ -121,7 +116,7 @@ def synthesize_signals(
         if bias == "neutral":
             trend_score = float(getattr(market, "return_5d", 0.0) or 0.0)
             bias = _bias_from_score(trend_score, threshold=0.0)
-        votes.append(Signal("market_trend", bias, _SIGNAL_WEIGHTS["market_trend"],
+        votes.append(Signal("market_trend", bias, sw["market_trend"],
                             f"trend={trend_val}"))
 
     # ---- aggregate ----

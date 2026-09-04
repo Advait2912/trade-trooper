@@ -23,8 +23,16 @@ htmlcov/
 *.db
 trade.log
 
-# IDE
+# Runtime artifacts (DBs, journals, logs)
+data/*
+!data/weights_db.json
+
+# IDE & temporary notes
 .idea/
 .vscode/
 *.swp
 .DS_Store
+scratch/
+JULES_REPORT.md
+docs/SUBMISSION_WRITEUP.md
+docs/assets/

@@ -1,0 +1,11 @@
+# Optional ML stack for the tuning/backtest tooling.
+# - FinBERT news-sentiment scorer (GPU-accelerated when available)
+# - Optuna-based weight optimization
+#
+# Install with: pip install -r requirements-ml.txt
+# For CUDA, install the matching torch build first (see pytorch.org) or let pip
+# pull the default; a GPU is recommended for FinBERT batch scoring.
+
+torch>=2.1
+transformers>=4.36
+optuna>=3.5

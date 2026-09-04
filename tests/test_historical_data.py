@@ -76,6 +76,24 @@ async def test_price_history_unsupported_interval(settings):
 
 
 @respx.mock
+async def test_price_history_end_date_uses_historical_window(settings):
+    from datetime import date
+
+    from tests.conftest import BARS_URL_RE, historical_bars
+
+    respx.get(BARS_URL_RE).mock(
+        return_value=httpx.Response(200, json={"bars": historical_bars("NVDA", n=90), "symbol": "NVDA"})
+    )
+    async with AlpacaClient(settings) as client:
+        await get_price_history(client, "NVDA", days_back=30, interval="1d",
+                                end_date=date(2024, 12, 31))
+    request = respx.routes[0].calls[0].request
+    assert request.url.params["end"] == "2024-12-31"
+    # start = end - max(days_back*2, 10) calendar days
+    assert request.url.params["start"] == "2024-11-01"
+
+
+@respx.mock
 async def test_dividends_parse_nested_payload(settings):
     mock_historical("NVDA")
     async with AlpacaClient(settings) as client:

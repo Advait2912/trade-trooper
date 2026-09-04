@@ -24,6 +24,7 @@ from schemas.prediction import PredictionResult
 from schemas.risk import RiskResult
 from utils.config import ConfigError, load_settings, validate_ticker
 from utils.logging import setup_logging
+from utils.paths import data_path
 
 
 def _render_prediction(pred: PredictionResult, lines: list[str]) -> None:
@@ -66,6 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("ticker", nargs="?", help="Stock ticker, e.g. NVDA")
     parser.add_argument(
+        "--universe",
+        default=None,
+        help="Comma-separated universe of tickers, e.g. NVDA,AMD,SPY",
+    )
+    parser.add_argument(
+        "--industry",
+        default=None,
+        help="Run on all tickers in an industry sector, e.g. Technology, Financials",
+    )
+    parser.add_argument(
         "--historical",
         action="store_true",
         help="Run only the Phase 1 Historical Data Agent and print its result.",
@@ -93,8 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--journal",
-        default="trading_journal.db",
-        help="Path to the SQLite journal (default trading_journal.db).",
+        default=str(data_path("trading_journal.db")),
+        help="Path to the SQLite journal (default data/trading_journal.db).",
     )
     parser.add_argument(
         "--news-limit",
@@ -316,8 +327,8 @@ async def _run(ticker: str, args: argparse.Namespace) -> FinalReport:
     return await pipeline.run(ticker)
 
 
-async def _run_trade(ticker: str, args: argparse.Namespace) -> int:
-    from trading.runner import PaperRunner
+async def _run_trade(tickers: list[str], args: argparse.Namespace) -> int:
+    from trading.runner import PaperRunner, PortfolioRunner
 
     settings = load_settings()
     if not settings.trading_enabled:
@@ -329,8 +340,13 @@ async def _run_trade(ticker: str, args: argparse.Namespace) -> int:
               "Use a paper key (PK...).", file=sys.stderr)
         return 2
 
-    runner = PaperRunner(settings, ticker, journal_path=args.journal, verbose=args.verbose)
-    print(f"Paper-trading loop started for {ticker}. Press Ctrl-C to stop.")
+    if len(tickers) == 1 and not args.universe and not args.industry:
+        runner = PaperRunner(settings, tickers[0], journal_path=args.journal, verbose=args.verbose)
+        print(f"Paper-trading loop started for {tickers[0]}. Press Ctrl-C to stop.")
+    else:
+        runner = PortfolioRunner(settings, tickers, verbose=args.verbose)
+        print(f"Portfolio trading loop started for {tickers}. Press Ctrl-C to stop.")
+
     try:
         await runner.start()
     except KeyboardInterrupt:
@@ -363,15 +379,40 @@ def main(argv: list[str] | None = None) -> int:
         print(render_stats(args.journal))
         return 0
 
-    if not args.ticker:
-        print("Error: a ticker is required (e.g. NVDA).", file=sys.stderr)
+    tickers: list[str] = []
+    if args.universe:
+        tickers = [t.strip().upper() for t in args.universe.split(",") if t.strip()]
+    elif args.industry:
+        from weights_db import INDUSTRY_STOCKS
+
+        ind = args.industry.strip()
+        matched = None
+        for k in INDUSTRY_STOCKS:
+            if k.lower() == ind.lower():
+                matched = k
+                break
+        if not matched:
+            print(
+                f"Error: unknown industry {ind!r}. Available: {list(INDUSTRY_STOCKS.keys())}",
+                file=sys.stderr,
+            )
+            return 2
+        tickers = list(INDUSTRY_STOCKS[matched])
+    elif args.ticker:
+        try:
+            tickers = [validate_ticker(args.ticker)]
+        except ConfigError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+
+    if not tickers:
+        print(
+            "Error: a ticker, --universe, or --industry is required (e.g. NVDA or --universe NVDA,AMD).",
+            file=sys.stderr,
+        )
         return 2
 
-    try:
-        ticker = validate_ticker(args.ticker)
-    except ConfigError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
+    ticker = tickers[0]
 
     try:
         if args.historical:
@@ -381,10 +422,15 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result.model_dump(), indent=2, default=str))
             return 0
         if args.trade:
-            return asyncio.run(_run_trade(ticker, args))
+            return asyncio.run(_run_trade(tickers, args))
         if args.backtest:
             return asyncio.run(_run_backtest(ticker, args))
-        report = asyncio.run(_run(ticker, args))
+
+        for t in tickers:
+            report = asyncio.run(_run(t, args))
+            print(render_report(report, verbose=args.verbose))
+            print("\nMACHINE-READABLE JSON:")
+            print(json.dumps(report.model_dump(), indent=2, default=str))
     except ConfigError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -392,9 +438,6 @@ def main(argv: list[str] | None = None) -> int:
         print("Interrupted.", file=sys.stderr)
         return 130
 
-    print(render_report(report, verbose=args.verbose))
-    print("\nMACHINE-READABLE JSON:")
-    print(json.dumps(report.model_dump(), indent=2, default=str))
     return 0
 
 

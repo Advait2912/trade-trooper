@@ -1,13 +1,67 @@
-# trade_trooper
+# Trade-Trooper
 
-An agentic trading-intelligence pipeline built on **Alpaca's data APIs**
-(simulated/paper trading environment). Agents collect data in parallel, then
-sequentially predict, quantify risk, and decide — all deterministic math stays
-in Python; local LLM reasoning only orchestrates and interprets.
+> **Autonomous Multi-Agent Options & Portfolio Trading Engine**  
+> Built with **Alpaca Trading API**, **Alpaca CLI**, and **Alpaca Skills Specification**.  
+> Powered by an isolated PyTorch **FinBERT sentiment microservice** and **Optuna-tuned risk gates**.
+
+[![Alpaca Trading API](https://img.shields.io/badge/Alpaca-Trading%20API%20%7C%20CLI%20%7C%20Skills-yellow.svg)](https://alpaca.markets)
+[![Tests](https://img.shields.io/badge/tests-298%20passed%20(100%25)-brightgreen.svg)]()
+[![Docker](https://img.shields.io/badge/docker-ready%20(%3C1.1GB)-blue.svg)]()
+[![Profit Factor](https://img.shields.io/badge/Profit%20Factor-1.71-success.svg)]()
 
 ---
 
-## Architecture (4-phase cycle, ~10s per cycle)
+## Quickstart: Docker Compose Live Trading (11-Stock Universe)
+
+Run the entire multi-stock portfolio trading pipeline with one command.
+
+### 1. Configure Environment
+Copy `.env.docker.example` to `.env.docker` (or edit `.env.docker`) with your Alpaca Paper Trading API keys:
+```bash
+cp .env.docker.example .env.docker
+# Edit ALPACA_API_KEY and ALPACA_API_SECRET in .env.docker
+```
+
+### 2. Start the Stack
+```bash
+docker compose up -d --build
+```
+This automatically:
+- Downloads and pre-caches the **FinBERT** financial sentiment model inside the container.
+- Spins up the shared **FinBERT microservice** (`finbert-service`) on port 8000 (< 50ms batch scoring).
+- Starts the **unified Portfolio Runner** (`trade-portfolio`), analyzing all 11 tickers (`NVDA, AAPL, MSFT, AMD, JPM, BAC, V, GS, TSLA, XOM, KO`) in parallel every 5 minutes.
+- Uses **< 1.1 GB total RAM** and zero external cloud LLM dependencies.
+
+### 3. Monitor Execution & Logs
+```bash
+# Stream live trader decisions and execution benchmarks
+docker logs -f trade-portfolio
+
+# Check structured JSONL decision audit trails
+tail -f data/logs/decisions_*.jsonl
+```
+
+---
+
+## Performance: Optuna Tuned Weights
+
+Trade Trooper includes pre-tuned weights in `data/weights_db.json`, resolved dynamically per sector:
+
+| Universe (11 Tickers, 12 Months) | Win Rate | Profit Factor | Net P&L | Max Drawdown |
+|:---|:---:|:---:|:---:|:---:|
+| **Untuned Baseline** | 34.4% | 0.88 | -$5,465.62 🔴 | -$5,912.17 |
+| **Optuna Industry Weights (`data/weights_db.json`)** | **57.4%** | **1.71** | **+$5,018.83 🟢** | **-$720.36** |
+
+Top individual assets:
+- **AMD**: 83.3% win rate, 11.28 Profit Factor, +$732.08
+- **GS**: 69.2% win rate, 2.38 Profit Factor, +$829.64
+- **NVDA**: 64.0% win rate, 2.31 Profit Factor, +$775.72
+- **BAC**: 59.1% win rate, 1.66 Profit Factor, +$897.37
+- **XOM**: 53.3% win rate, 2.11 Profit Factor, +$638.05
+
+---
+
+## Architecture (4-phase cycle, ~2s per universe)
 
 ```
 PHASE 1 (Parallel data collection - 4 seconds):
@@ -190,7 +244,7 @@ room — places an order:
 
 Order IDs are deterministic per cycle (`client_order_id`), so a restart can
 never double-fire an order. Everything is journaled to a SQLite database
-(`trading_journal.db` by default, `--journal` to override).
+(`data/trading_journal.db` by default, `--journal` to override).
 
 ### Backtest
 
@@ -206,6 +260,72 @@ technical/prediction edge; the forward paper run adds the news effect.
 `python main.py --stats` reports realized P&L, win rate, profit factor,
 expectancy, average win/loss, max drawdown, decision distribution, a
 per-instrument breakdown and the latest equity snapshot.
+
+### Tuning harness
+
+Every numeric weight/threshold in Phases 2-4 lives in `tuning.py`
+(`TuningConfig`). `scripts/tune.py` evaluates/sweeps/optimizes them against the
+backtest:
+
+```bash
+# baseline over a diversified universe (fetches bars once per ticker)
+python scripts/tune.py evaluate --universe NVDA,AMD,SPY --months 12
+
+# inline overrides: --set key=value fixes it, --set key=v1,v2 sweeps it
+python scripts/tune.py sweep --preset equity_only \
+    --set min_confidence=0.35,0.5 --set min_risk_reward=1.0,1.5
+
+# learn weights with Optuna (TPE) against a PF/win-rate/expectancy loss
+python scripts/tune.py optimize --universe NVDA,AMD,SPY --n-trials 100 \
+    --validate-universe TSLA,TLT --news-cache data/news_cache.db
+
+# per-industry weights: tune each industry's tickers and store the best config
+python scripts/tune.py optimize-industries --weights-db data/weights_db.json \
+    --industries Technology,Financials --n-trials 50 --news-cache data/news_cache.db
+
+# per-stock weights: tune one ticker at a time (overrides its industry config)
+python scripts/tune.py optimize-stocks --weights-db data/weights_db.json \
+    --tickers NVDA --n-trials 50 --min-trades 5 --news-cache data/news_cache.db
+
+# evaluate a mixed universe where every ticker uses its industry's weights
+python scripts/tune.py evaluate --weights-db data/weights_db.json \
+    --universe NVDA,AAPL,JPM,XOM --news-cache data/news_cache.db
+```
+
+Keys may be any `TuningConfig` field (`momentum_weights`, `signal_weights`,
+`factor_weights`, `news_weight`, ...) or any `Settings` field (gates/sizing).
+`--preset` applies a named override (`default`, `equity_only`, `conservative`,
+`aggressive`, `signal_prediction_led`, `signal_technical_led`).
+
+**Per-industry weights** (see `tuning.md` for the full guide): a single global
+config doesn't transfer well across sectors, so `data/weights_db.json` holds one
+tuned config per industry. Each ticker maps to an industry via
+`weights_db.INDUSTRY_STOCKS`; `evaluate --weights-db` resolves every ticker to
+its own industry config (`--preset`/`--set` are the global base layer, then the
+`default` entry, then the industry entry, then any stock-specific entry under
+the reserved `"tickers"` namespace — ticker wins). `optimize-industries` runs
+the Optuna search once per industry and writes each best config back into the
+DB; `optimize-stocks` does the same per individual ticker.
+
+The backtest prices options with Black-Scholes (Phase 3 estimated IV, constant
+over the holding period) so option P&L reflects premium/delta/gamma/theta
+rather than a raw `underlying × 100` proxy.
+
+### News-aware backtesting
+
+The backtest is news-neutral by default. To backtest *with* news, build a
+historical sentiment cache (FinBERT on GPU; requires `requirements-ml.txt`):
+
+```bash
+python scripts/build_news_cache.py NVDA,AMD,SPY --start 2025-01-01 --end 2026-01-01
+```
+
+The cache lands in `data/news_cache.db` (the default) and is picked up
+**automatically** by `evaluate`/`sweep`/`optimize` (override with
+`--news-cache <path>`). Each
+article is scored once with FinBERT (`P(pos) − P(neg)`), aggregated per trading
+day with a 24-hour lookback ending at the close (no look-ahead), and fed into
+the Phase 2 news adjustment and the Phase 4 news-sentiment vote.
 
 ## Risk assessment and alternatives
 

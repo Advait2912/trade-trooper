@@ -257,15 +257,16 @@ def calculate_macd(
             "trend": "bearish",
             "momentum_strength": "weak",
         }
-    indicator = MACD(
-        _series(closes),
-        window_fast=fast_period,
-        window_slow=slow_period,
-        window_sign=signal_period,
-    )
-    macd = _clean(indicator.macd().iloc[-1])
-    signal_line = _clean(indicator.macd_signal().iloc[-1])
-    histogram = _clean(indicator.macd_diff().iloc[-1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        indicator = MACD(
+            _series(closes),
+            window_fast=fast_period,
+            window_slow=slow_period,
+            window_sign=signal_period,
+        )
+        macd = _clean(indicator.macd().iloc[-1])
+        signal_line = _clean(indicator.macd_signal().iloc[-1])
+        histogram = _clean(indicator.macd_diff().iloc[-1])
     trend = "bullish" if macd > signal_line else "bearish"
     price = closes[-1] or 1.0
     act = abs(histogram) / price
@@ -301,12 +302,13 @@ def calculate_bollinger_bands(
             "squeeze": False,
             "volatility_regime": "normal",
         }
-    all_bbands = BollingerBands(
-        _series(closes), window=period, window_dev=std_dev  # type: ignore[arg-type]
-    )
-    upper = _clean(all_bbands.bollinger_hband().iloc[-1])
-    middle = _clean(all_bbands.bollinger_mavg().iloc[-1])
-    lower = _clean(all_bbands.bollinger_lband().iloc[-1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        all_bbands = BollingerBands(
+            _series(closes), window=period, window_dev=std_dev  # type: ignore[arg-type]
+        )
+        upper = _clean(all_bbands.bollinger_hband().iloc[-1])
+        middle = _clean(all_bbands.bollinger_mavg().iloc[-1])
+        lower = _clean(all_bbands.bollinger_lband().iloc[-1])
     current = closes[-1]
 
     if current > upper:
@@ -357,10 +359,11 @@ def calculate_stochastic(
             "signal": "neutral",
             "crossover": "none",
         }
-    stoch = StochasticOscillator(
-        _series(highs), _series(lows), _series(closes), window=period
-    )
-    k_vals = np.asarray(stoch.stoch(), dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        stoch = StochasticOscillator(
+            _series(highs), _series(lows), _series(closes), window=period
+        )
+        k_vals = np.asarray(stoch.stoch(), dtype=float)
     k_vals = k_vals[~np.isnan(k_vals)]
     if len(k_vals) < 3:
         return {
@@ -443,12 +446,13 @@ def calculate_adx(
             "trend_strength": "no_trend",
             "trend_direction": "ranging",
         }
-    adx_ind = ADXIndicator(
-        _series(high_prices), _series(low_prices), _series(close_prices), window=period
-    )
-    adx_val = _clean(adx_ind.adx().iloc[-1])
-    plus_di = _clean(adx_ind.adx_pos().iloc[-1])
-    minus_di = _clean(adx_ind.adx_neg().iloc[-1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        adx_ind = ADXIndicator(
+            _series(high_prices), _series(low_prices), _series(close_prices), window=period
+        )
+        adx_val = _clean(adx_ind.adx().iloc[-1])
+        plus_di = _clean(adx_ind.adx_pos().iloc[-1])
+        minus_di = _clean(adx_ind.adx_neg().iloc[-1])
 
     if adx_val >= 50:
         strength = "very_strong"
@@ -490,9 +494,10 @@ def calculate_obv(
             "obv_trend": "flat",
             "volume_confirmation": "divergence",
         }
-    obv_series = OnBalanceVolumeIndicator(
-        _series(closes), _series(volumes)
-    ).on_balance_volume()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        obv_series = OnBalanceVolumeIndicator(
+            _series(closes), _series(volumes)
+        ).on_balance_volume()
     obv_series = obv_series.astype(float).dropna()
     if len(obv_series) < 3:
         return {
